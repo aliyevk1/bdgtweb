@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BudgetWise MVP</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   </head>
   <body class="bg-slate-50 text-slate-900">
     <div class="mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-4 py-10">
@@ -209,6 +210,36 @@
             No recurring templates yet. Create one on the Categories page.
           </p>
         </div>
+
+        <div class="grid gap-6 md:grid-cols-2">
+          <div class="rounded-lg bg-white p-6 shadow">
+            <h2 class="text-xl font-semibold">This Month: Spending Mix</h2>
+            <p id="doughnut-empty-state" class="mt-2 hidden text-sm text-slate-500 text-center">
+              No spending yet this month.
+            </p>
+            <div class="mt-4 flex justify-center">
+              <canvas
+                id="budgetDoughnutChart"
+                class="max-w-full"
+                style="max-width: 600px; width: 100%; height: auto;"
+              ></canvas>
+            </div>
+          </div>
+
+          <div class="rounded-lg bg-white p-6 shadow">
+            <h2 class="text-xl font-semibold">Spending by Category</h2>
+            <p id="bar-empty-state" class="mt-2 hidden text-sm text-slate-500 text-center">
+              No categories yet.
+            </p>
+            <div class="mt-4 flex justify-center">
+              <canvas
+                id="spendingBarChart"
+                class="max-w-full"
+                style="max-width: 600px; width: 100%; height: auto;"
+              ></canvas>
+            </div>
+          </div>
+        </div>
       </section>
     </div>
 
@@ -266,6 +297,9 @@
           ? "rounded bg-red-100 p-3 text-sm text-red-700"
           : "rounded bg-emerald-100 p-3 text-sm text-emerald-700";
       }
+
+      let budgetDoughnutRef = null;
+      let spendingBarRef = null;
 
       function renderBudgets(budgets) {
         const mapping = {
@@ -460,6 +494,8 @@
           document.getElementById("total-income").textContent = formatCurrency(data.totalIncome);
           renderBudgets(data.budgets);
           renderTransactions(data.transactions);
+          renderBudgetDoughnut(data.budgets);
+          await fetchSpendingByCategory();
         } catch (error) {
           console.error(error);
           setStatus(error.message, true);
@@ -492,6 +528,170 @@
           recurringCache = [];
           renderQuickLog(recurringCache);
         }
+      }
+
+      async function fetchSpendingByCategory() {
+        try {
+          const headers = requireAuthHeaders();
+          if (!headers) {
+            return;
+          }
+
+          const response = await fetch("/api/reports/spending-by-category", { headers });
+          if (response.status === 401) {
+            handleUnauthorized();
+            return;
+          }
+
+          if (!response.ok) {
+            throw new Error("Unable to load category spending.");
+          }
+
+          const data = await response.json();
+          renderSpendingBarChart(Array.isArray(data) ? data : []);
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message, true);
+          renderSpendingBarChart([]);
+        }
+      }
+
+      function renderBudgetDoughnut(budgets) {
+        const canvas = document.getElementById("budgetDoughnutChart");
+        const emptyState = document.getElementById("doughnut-empty-state");
+        if (!canvas || !window.Chart) {
+          return;
+        }
+
+        const necessities = budgets.Necessities?.spent || 0;
+        const leisure = budgets.Leisure?.spent || 0;
+        const savings = budgets.Savings?.spent || 0;
+        const totalSpent = necessities + leisure + savings;
+
+        if (totalSpent === 0) {
+          if (emptyState) {
+            emptyState.classList.remove("hidden");
+          }
+          if (budgetDoughnutRef) {
+            budgetDoughnutRef.destroy();
+            budgetDoughnutRef = null;
+          }
+          return;
+        }
+
+        if (emptyState) {
+          emptyState.classList.add("hidden");
+        }
+
+        if (budgetDoughnutRef) {
+          budgetDoughnutRef.destroy();
+        }
+
+        budgetDoughnutRef = new Chart(canvas, {
+          type: "doughnut",
+          data: {
+            labels: ["Necessities", "Leisure", "Savings"],
+            datasets: [
+              {
+                data: [necessities, leisure, savings],
+                backgroundColor: ["#1D4ED8", "#F59E0B", "#10B981"],
+                borderWidth: 1,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: {
+                position: "bottom",
+              },
+              title: {
+                display: true,
+                text: "This month: spending mix",
+              },
+            },
+          },
+        });
+      }
+
+      function renderSpendingBarChart(data) {
+        const canvas = document.getElementById("spendingBarChart");
+        const emptyState = document.getElementById("bar-empty-state");
+        if (!canvas || !window.Chart) {
+          return;
+        }
+
+        if (!Array.isArray(data) || data.length === 0) {
+          if (emptyState) {
+            emptyState.classList.remove("hidden");
+          }
+          if (spendingBarRef) {
+            spendingBarRef.destroy();
+            spendingBarRef = null;
+          }
+          return;
+        }
+
+        if (emptyState) {
+          emptyState.classList.add("hidden");
+        }
+
+        if (spendingBarRef) {
+          spendingBarRef.destroy();
+        }
+
+        const labels = data.map((item) => item.name);
+        const totals = data.map((item) => item.total);
+
+        spendingBarRef = new Chart(canvas, {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "Spent",
+                data: totals,
+                backgroundColor: "#6366F1",
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: {
+                display: false,
+              },
+              title: {
+                display: true,
+                text: "Spending by category",
+              },
+              tooltip: {
+                callbacks: {
+                  label(context) {
+                    const value = context.parsed.y || 0;
+                    return `${context.dataset.label || "Spent"}: ${formatCurrency(value)}`;
+                  },
+                },
+              },
+            },
+            scales: {
+              x: {
+                ticks: {
+                  callback(value, index) {
+                    const label = labels[index] || "";
+                    if (labels.length > 6) {
+                      return label.length > 10 ? `${label.slice(0, 10)}…` : label;
+                    }
+                    return label;
+                  },
+                },
+              },
+              y: {
+                beginAtZero: true,
+              },
+            },
+          },
+        });
       }
 
       async function logRecurringExpense(template) {
@@ -646,6 +846,7 @@
             renderCategoryOptions(categoriesCache);
             setStatus("Expense recorded successfully.");
             await fetchDashboard();
+            await fetchSpendingByCategory();
           } catch (error) {
             console.error(error);
             setStatus(error.message, true);
@@ -655,6 +856,7 @@
         await fetchCategories();
         await fetchRecurringTemplates();
         await fetchDashboard();
+        await fetchSpendingByCategory();
       });
     </script>
   </body>

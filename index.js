@@ -398,6 +398,36 @@ app.get('/api/recurring', authenticate, async (req, res) => {
   }
 });
 
+app.get('/api/reports/spending-by-category', authenticate, async (req, res) => {
+  try {
+    const { startIso, endIso } = getCurrentMonthRange();
+
+    const rows = await all(
+      `
+        SELECT
+          COALESCE(uc.name, 'Uncategorized') AS name,
+          COALESCE(SUM(e.amount), 0) AS total
+        FROM Expenditure e
+        LEFT JOIN UserCategory uc ON uc.id = e.user_category_id
+        WHERE e.user_id = ? AND e.date >= ? AND e.date < ?
+        GROUP BY uc.name
+        ORDER BY total DESC
+      `,
+      [req.userId, startIso, endIso],
+    );
+
+    res.json(
+      rows.map((row) => ({
+        name: row.name,
+        total: Number(row.total || 0),
+      })),
+    );
+  } catch (error) {
+    console.error('Failed to load spending by category:', error);
+    res.status(500).json({ message: 'Failed to load spending by category.' });
+  }
+});
+
 app.delete('/api/recurring/:id', authenticate, async (req, res) => {
   try {
     const templateId = Number.parseInt(req.params.id, 10);
