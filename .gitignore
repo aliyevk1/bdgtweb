@@ -1,6 +1,9 @@
 # Node.js
 node_modules/
 
+#db
+budget.db
+
 # Logs
 logs
 *.log

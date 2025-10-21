@@ -144,6 +144,19 @@
     </div>
 
     <script>
+      // --- UTILITY FUNCTIONS ---
+      /**
+       * Formats a number as a USD currency string (e.g., 1234.5 -> $1,234.50)
+       * @param {number} amount - The number to format
+       * @returns {string} A currency-formatted string
+       */
+      function formatCurrency(amount) {
+        return new Intl.NumberFormat("en-US", {
+          style: "currency",
+          currency: "USD",
+        }).format(amount);
+      }
+
       const existingToken = localStorage.getItem("token");
       if (!existingToken) {
         window.location.href = "/login.html";
