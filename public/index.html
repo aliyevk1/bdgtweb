@@ -198,6 +198,36 @@
           <p id="transactions-empty" class="mt-4 text-sm text-slate-500">
             No transactions yet. Add income or expenses to populate your dashboard.
           </p>
+          <div
+            id="transactions-error"
+            class="mt-4 hidden rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            role="alert"
+            aria-live="polite"
+          >
+            <span id="transactions-error-message"></span>
+            <button
+              id="transactions-error-retry"
+              type="button"
+              class="ml-3 inline-flex items-center rounded border border-red-300 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
+            >
+              Retry
+            </button>
+          </div>
+          <button
+            id="transactions-load-more"
+            type="button"
+            class="mt-4 hidden w-full rounded border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
+          >
+            Load more
+          </button>
+          <p
+            id="transactions-end"
+            class="mt-4 hidden text-center text-sm text-slate-500"
+            role="status"
+            aria-live="polite"
+          >
+            End of results.
+          </p>
         </div>
 
         <div class="rounded-lg bg-white p-6 shadow">
@@ -253,12 +283,21 @@
         style: "currency",
         currency: "USD",
         minimumFractionDigits: 2,
-      });
-
-      const categorySelect = document.getElementById("category-select");
+      });      const categorySelect = document.getElementById("category-select");
       const categoryEmptyHint = document.getElementById("category-empty");
+      const transactionsListEl = document.getElementById("transactions-list");
+      const transactionsEmptyEl = document.getElementById("transactions-empty");
+      const transactionsErrorEl = document.getElementById("transactions-error");
+      const transactionsErrorMessageEl = document.getElementById("transactions-error-message");
+      const transactionsErrorRetryButton = document.getElementById("transactions-error-retry");
+      const transactionsLoadMoreButton = document.getElementById("transactions-load-more");
+      const transactionsEndEl = document.getElementById("transactions-end");
       let categoriesCache = [];
       let recurringCache = [];
+      let transactionsState = [];
+      let transactionsCursor = null;
+      let transactionsHasMore = false;
+      let transactionsIsLoading = false;
 
       function formatCurrency(value) {
         return currencyFormatter.format(Number.isFinite(value) ? value : 0);
@@ -360,59 +399,193 @@
         categorySelect.value = "";
       }
 
-      function renderTransactions(transactions) {
-        const list = document.getElementById("transactions-list");
-        const emptyState = document.getElementById("transactions-empty");
+      function createTransactionKey(transaction) {
+        return `${transaction.type || 'Transaction'}:${transaction.id ?? ''}`;
+      }
 
-        list.innerHTML = "";
-
-        if (!transactions || transactions.length === 0) {
-          emptyState.classList.remove("hidden");
+      function renderTransactionsList() {
+        if (!transactionsListEl || !transactionsEmptyEl) {
           return;
         }
 
-        emptyState.classList.add("hidden");
+        transactionsListEl.innerHTML = "";
 
-        transactions.forEach((transaction) => {
-          const item = document.createElement("li");
-          item.className = "flex items-start justify-between gap-2 py-3";
+        if (!transactionsState.length) {
+          transactionsEmptyEl.classList.remove('hidden');
+          if (transactionsEndEl) {
+            transactionsEndEl.classList.add('hidden');
+          }
+          return;
+        }
 
-          const infoWrapper = document.createElement("div");
-          infoWrapper.className = "flex flex-col";
+        transactionsEmptyEl.classList.add('hidden');
 
-          const title = document.createElement("span");
-          title.className = "font-medium";
-          title.textContent = transaction.label || (transaction.type === "Income" ? "Income" : "Expense");
+        transactionsState.forEach((transaction) => {
+          const item = document.createElement('li');
+          item.className = 'flex items-start justify-between gap-2 py-3';
 
-          const subtitle = document.createElement("span");
-          subtitle.className = "text-xs uppercase tracking-wide text-slate-500";
+          const infoWrapper = document.createElement('div');
+          infoWrapper.className = 'flex flex-col';
+
+          const title = document.createElement('span');
+          title.className = 'font-medium';
+          const label = transaction.type === 'Income'
+            ? (transaction.source || 'Income')
+            : (transaction.category_name || transaction.description || 'Expense');
+          title.textContent = label;
+
+          const subtitle = document.createElement('span');
+          subtitle.className = 'text-xs uppercase tracking-wide text-slate-500';
           const details = [];
 
-          if (transaction.type === "Income") {
-            details.push("Income");
+          if (transaction.type === 'Income') {
+            details.push('Income');
           } else {
-            details.push(transaction.budgetType || "Expense");
-            if (transaction.detail) {
-              details.push(transaction.detail);
+            details.push(transaction.category_budget_type || 'Uncategorized');
+            if (transaction.description) {
+              details.push(transaction.description);
+            } else if (transaction.category_name) {
+              details.push(transaction.category_name);
             }
           }
 
-          details.push(new Date(transaction.date).toLocaleString());
-          subtitle.textContent = details.filter(Boolean).join(" • ");
+          const timestamp = new Date(transaction.date);
+          if (!Number.isNaN(timestamp.getTime())) {
+            details.push(timestamp.toLocaleString());
+          }
+
+          subtitle.textContent = details.filter(Boolean).join(' \u2022 ');
 
           infoWrapper.appendChild(title);
           infoWrapper.appendChild(subtitle);
 
-          const amount = document.createElement("span");
-          amount.className =
-            transaction.type === "Income" ? "font-semibold text-emerald-600" : "font-semibold text-slate-700";
+          const amount = document.createElement('span');
+          amount.className = transaction.type === 'Income'
+            ? 'font-semibold text-emerald-600'
+            : 'font-semibold text-slate-700';
           amount.textContent = formatCurrency(transaction.amount);
 
           item.appendChild(infoWrapper);
           item.appendChild(amount);
 
-          list.appendChild(item);
+          transactionsListEl.appendChild(item);
         });
+      }
+
+      function hideTransactionsError() {
+        if (!transactionsErrorEl) {
+          return;
+        }
+        transactionsErrorEl.classList.add('hidden');
+        if (transactionsErrorMessageEl) {
+          transactionsErrorMessageEl.textContent = '';
+        }
+      }
+
+      function showTransactionsError(message) {
+        if (!transactionsErrorEl || !transactionsErrorMessageEl) {
+          return;
+        }
+        transactionsErrorMessageEl.textContent = message || 'Failed to load additional transactions.';
+        transactionsErrorEl.classList.remove('hidden');
+      }
+
+      function updateLoadMoreUI() {
+        if (!transactionsLoadMoreButton || !transactionsEndEl) {
+          return;
+        }
+
+        if (!transactionsState.length) {
+          transactionsLoadMoreButton.classList.add('hidden');
+          transactionsEndEl.classList.add('hidden');
+          return;
+        }
+
+        if (transactionsHasMore && transactionsCursor) {
+          transactionsLoadMoreButton.classList.remove('hidden');
+          transactionsLoadMoreButton.disabled = transactionsIsLoading;
+          transactionsLoadMoreButton.textContent = transactionsIsLoading ? 'Loading…' : 'Load more';
+          transactionsEndEl.classList.add('hidden');
+        } else {
+          transactionsLoadMoreButton.classList.add('hidden');
+          transactionsEndEl.classList.remove('hidden');
+        }
+      }
+
+      function setTransactions(items, nextCursor, hasMore) {
+        transactionsState = Array.isArray(items) ? items.slice(0, 200) : [];
+        transactionsCursor = nextCursor || null;
+        transactionsHasMore = Boolean(nextCursor);
+        hideTransactionsError();
+        renderTransactionsList();
+        updateLoadMoreUI();
+      }
+
+      function appendTransactions(items, nextCursor) {
+        if (!Array.isArray(items) || items.length === 0) {
+          transactionsCursor = nextCursor || null;
+          transactionsHasMore = Boolean(nextCursor);
+          updateLoadMoreUI();
+          return;
+        }
+
+        const existingKeys = new Set(transactionsState.map(createTransactionKey));
+        items.forEach((transaction) => {
+          const key = createTransactionKey(transaction);
+          if (!existingKeys.has(key)) {
+            transactionsState.push(transaction);
+            existingKeys.add(key);
+          }
+        });
+
+        if (transactionsState.length > 200) {
+          transactionsState = transactionsState.slice(0, 200);
+        }
+
+        transactionsCursor = nextCursor || null;
+        transactionsHasMore = Boolean(nextCursor);
+        hideTransactionsError();
+        renderTransactionsList();
+        updateLoadMoreUI();
+      }
+
+      async function handleLoadMore() {
+        if (!transactionsHasMore || !transactionsCursor || transactionsIsLoading) {
+          return;
+        }
+
+        const headers = requireAuthHeaders();
+        if (!headers) {
+          return;
+        }
+
+        transactionsIsLoading = true;
+        hideTransactionsError();
+        updateLoadMoreUI();
+
+        try {
+          const params = new URLSearchParams({ cursor: transactionsCursor, limit: '20' });
+          const response = await fetch(`/api/transactions?${params.toString()}`, { headers });
+
+          if (response.status === 401) {
+            handleUnauthorized();
+            return;
+          }
+
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.message || 'Failed to load additional transactions.');
+          }
+
+          const data = await response.json();
+          appendTransactions(Array.isArray(data.items) ? data.items : [], data.nextCursor || null);
+        } catch (error) {
+          console.error('Load more transactions error:', error);
+          showTransactionsError(error.message);
+        } finally {
+          transactionsIsLoading = false;
+          updateLoadMoreUI();
+        }
       }
 
       async function fetchCategories() {
@@ -493,7 +666,7 @@
           const data = await response.json();
           document.getElementById("total-income").textContent = formatCurrency(data.totalIncome);
           renderBudgets(data.budgets);
-          renderTransactions(data.transactions);
+          setTransactions(Array.isArray(data.transactions) ? data.transactions : [], data.nextCursor || null, data.hasMore);
           renderBudgetDoughnut(data.budgets);
           await fetchSpendingByCategory();
         } catch (error) {
@@ -744,6 +917,14 @@
           });
         }
 
+        if (transactionsLoadMoreButton) {
+          transactionsLoadMoreButton.addEventListener("click", () => handleLoadMore());
+        }
+
+        if (transactionsErrorRetryButton) {
+          transactionsErrorRetryButton.addEventListener("click", () => handleLoadMore());
+        }
+
         incomeForm.addEventListener("submit", async (event) => {
           event.preventDefault();
 
@@ -859,6 +1040,19 @@
     </script>
   </body>
 </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
