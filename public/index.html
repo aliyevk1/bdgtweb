@@ -6,13 +6,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BudgetWise MVP</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   </head>
   <body class="bg-slate-50 text-slate-900">
     <div class="mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-4 py-10">
       <nav class="flex items-center justify-end gap-3 text-sm font-medium">
         <a class="text-slate-600 hover:underline" href="/categories.html">Categories</a>
-        <a class="text-blue-600 hover:underline" href="/register.html">Register</a>
-        <a class="text-slate-600 hover:underline" href="/login.html">Login</a>
+        <a id="register-link" class="text-blue-600 hover:underline" href="/register.html">Register</a>
+        <a id="login-link" class="text-slate-600 hover:underline" href="/login.html">Login</a>
         <button
           id="logout-button"
           type="button"
@@ -109,7 +110,7 @@
               class="w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             ></select>
             <p id="category-empty" class="hidden text-xs text-slate-500">
-              No categories yet. Visit the Categories page to add one.
+              No categories yet—expenses will be logged as Uncategorized. Visit the Categories page to add one.
             </p>
           </div>
 
@@ -192,14 +193,6 @@
         </div>
 
         <div class="rounded-lg bg-white p-6 shadow">
-          <h2 class="text-xl font-semibold">Recent Activity</h2>
-          <ul id="transactions-list" class="mt-4 divide-y divide-slate-200"></ul>
-          <p id="transactions-empty" class="mt-4 text-sm text-slate-500">
-            No transactions yet. Add income or expenses to populate your dashboard.
-          </p>
-        </div>
-
-        <div class="rounded-lg bg-white p-6 shadow">
           <h2 class="text-xl font-semibold">Quick Log</h2>
           <p class="mt-2 text-sm text-slate-500">
             Tap a template to record it instantly.
@@ -209,25 +202,117 @@
             No recurring templates yet. Create one on the Categories page.
           </p>
         </div>
+
+        <div class="rounded-lg bg-white p-6 shadow">
+          <h2 class="text-xl font-semibold">Recent Activity</h2>
+          <ul id="transactions-list" class="mt-4 divide-y divide-slate-200"></ul>
+          <p id="transactions-empty" class="mt-4 text-sm text-slate-500">
+            No transactions yet. Add income or expenses to populate your dashboard.
+          </p>
+          <div
+            id="transactions-error"
+            class="mt-4 hidden rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+            role="alert"
+            aria-live="polite"
+          >
+            <span id="transactions-error-message"></span>
+            <button
+              id="transactions-error-retry"
+              type="button"
+              class="ml-3 inline-flex items-center rounded border border-red-300 px-3 py-1 text-xs font-semibold text-red-700 hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
+            >
+              Retry
+            </button>
+          </div>
+          <button
+            id="transactions-load-more"
+            type="button"
+            class="mt-4 hidden w-full rounded border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
+          >
+            Load more
+          </button>
+          <p
+            id="transactions-end"
+            class="mt-4 hidden text-center text-sm text-slate-500"
+            role="status"
+            aria-live="polite"
+          >
+            End of results.
+          </p>
+        </div>
+
+        <div class="grid gap-6 md:grid-cols-2">
+          <div class="rounded-lg bg-white p-6 shadow">
+            <h2 class="text-xl font-semibold">This Month: Spending Mix</h2>
+            <p id="doughnut-empty-state" class="mt-2 hidden text-sm text-slate-500 text-center">
+              No spending yet this month.
+            </p>
+            <div class="mt-4 flex justify-center">
+              <canvas
+                id="budgetDoughnutChart"
+                class="max-w-full"
+                style="max-width: 600px; width: 100%; height: auto;"
+              ></canvas>
+            </div>
+          </div>
+
+          <div class="rounded-lg bg-white p-6 shadow">
+            <h2 class="text-xl font-semibold">Spending by Category</h2>
+            <p id="bar-empty-state" class="mt-2 hidden text-sm text-slate-500 text-center">
+              No categories yet.
+            </p>
+            <div class="mt-4 flex justify-center">
+              <canvas
+                id="spendingBarChart"
+                class="max-w-full"
+                style="max-width: 600px; width: 100%; height: auto;"
+              ></canvas>
+            </div>
+          </div>
+        </div>
       </section>
     </div>
 
     <script>
-      const existingToken = localStorage.getItem("token");
-      if (!existingToken) {
-        window.location.href = "/login.html";
+      const registerLink = document.getElementById("register-link");
+      const loginLink = document.getElementById("login-link");
+      const logoutButton = document.getElementById("logout-button");
+
+      function refreshNavAuthState() {
+        const hasToken = Boolean(localStorage.getItem("token"));
+        if (registerLink) {
+          registerLink.classList.toggle("hidden", hasToken);
+        }
+        if (loginLink) {
+          loginLink.classList.toggle("hidden", hasToken);
+        }
+        if (logoutButton) {
+          logoutButton.classList.toggle("hidden", !hasToken);
+        }
       }
+
+      refreshNavAuthState();
 
       const currencyFormatter = new Intl.NumberFormat("en-US", {
         style: "currency",
         currency: "USD",
         minimumFractionDigits: 2,
       });
-
       const categorySelect = document.getElementById("category-select");
       const categoryEmptyHint = document.getElementById("category-empty");
+      const transactionsListEl = document.getElementById("transactions-list");
+      const transactionsEmptyEl = document.getElementById("transactions-empty");
+      const transactionsErrorEl = document.getElementById("transactions-error");
+      const transactionsErrorMessageEl = document.getElementById("transactions-error-message");
+      const transactionsErrorRetryButton = document.getElementById("transactions-error-retry");
+      const transactionsLoadMoreButton = document.getElementById("transactions-load-more");
+      const transactionsEndEl = document.getElementById("transactions-end");
       let categoriesCache = [];
       let recurringCache = [];
+      let transactionsState = [];
+      let transactionsCursor = null;
+      let transactionsHasMore = false;
+      let transactionsIsLoading = false;
 
       function formatCurrency(value) {
         return currencyFormatter.format(Number.isFinite(value) ? value : 0);
@@ -235,6 +320,7 @@
 
       function handleUnauthorized() {
         localStorage.removeItem("token");
+        refreshNavAuthState();
         window.location.href = "/login.html";
       }
 
@@ -266,6 +352,9 @@
           ? "rounded bg-red-100 p-3 text-sm text-red-700"
           : "rounded bg-emerald-100 p-3 text-sm text-emerald-700";
       }
+
+      let budgetDoughnutRef = null;
+      let spendingBarRef = null;
 
       function renderBudgets(budgets) {
         const mapping = {
@@ -299,90 +388,220 @@
           return;
         }
 
+        const safeCategories = Array.isArray(categories) ? categories : [];
+
         categorySelect.innerHTML = "";
 
-        if (!categories || categories.length === 0) {
-          categorySelect.disabled = true;
+        const uncategorizedOption = document.createElement("option");
+        uncategorizedOption.value = "";
+        uncategorizedOption.textContent = "Uncategorized (no category)";
+        categorySelect.appendChild(uncategorizedOption);
+
+        if (safeCategories.length > 0) {
           if (categoryEmptyHint) {
-            categoryEmptyHint.classList.remove("hidden");
+            categoryEmptyHint.classList.add("hidden");
           }
-          return;
+        } else if (categoryEmptyHint) {
+          categoryEmptyHint.classList.remove("hidden");
         }
 
-        if (categoryEmptyHint) {
-          categoryEmptyHint.classList.add("hidden");
-        }
-
-        categorySelect.disabled = false;
-
-        const placeholder = document.createElement("option");
-        placeholder.value = "";
-        placeholder.textContent = "Select category";
-        placeholder.disabled = true;
-        placeholder.selected = true;
-        categorySelect.appendChild(placeholder);
-
-        categories.forEach((category) => {
+        safeCategories.forEach((category) => {
           const option = document.createElement("option");
           option.value = category.id;
           option.textContent = `${category.name} (${category.budget_type})`;
           categorySelect.appendChild(option);
         });
+
+        categorySelect.value = "";
       }
 
-      function renderTransactions(transactions) {
-        const list = document.getElementById("transactions-list");
-        const emptyState = document.getElementById("transactions-empty");
+      function createTransactionKey(transaction) {
+        return `${transaction.type || 'Transaction'}:${transaction.id ?? ''}`;
+      }
 
-        list.innerHTML = "";
-
-        if (!transactions || transactions.length === 0) {
-          emptyState.classList.remove("hidden");
+      function renderTransactionsList() {
+        if (!transactionsListEl || !transactionsEmptyEl) {
           return;
         }
 
-        emptyState.classList.add("hidden");
+        transactionsListEl.innerHTML = "";
 
-        transactions.forEach((transaction) => {
-          const item = document.createElement("li");
-          item.className = "flex items-start justify-between gap-2 py-3";
+        if (!transactionsState.length) {
+          transactionsEmptyEl.classList.remove('hidden');
+          if (transactionsEndEl) {
+            transactionsEndEl.classList.add('hidden');
+          }
+          return;
+        }
 
-          const infoWrapper = document.createElement("div");
-          infoWrapper.className = "flex flex-col";
+        transactionsEmptyEl.classList.add('hidden');
 
-          const title = document.createElement("span");
-          title.className = "font-medium";
-          title.textContent = transaction.label || (transaction.type === "Income" ? "Income" : "Expense");
+        transactionsState.forEach((transaction) => {
+          const item = document.createElement('li');
+          item.className = 'flex items-start justify-between gap-2 py-3';
 
-          const subtitle = document.createElement("span");
-          subtitle.className = "text-xs uppercase tracking-wide text-slate-500";
+          const infoWrapper = document.createElement('div');
+          infoWrapper.className = 'flex flex-col';
+
+          const title = document.createElement('span');
+          title.className = 'font-medium';
+          const label = transaction.type === 'Income'
+            ? (transaction.source || 'Income')
+            : (transaction.category_name || transaction.description || 'Expense');
+          title.textContent = label;
+
+          const subtitle = document.createElement('span');
+          subtitle.className = 'text-xs uppercase tracking-wide text-slate-500';
           const details = [];
 
-          if (transaction.type === "Income") {
-            details.push("Income");
+          if (transaction.type === 'Income') {
+            details.push('Income');
           } else {
-            details.push(transaction.budgetType || "Expense");
-            if (transaction.detail) {
-              details.push(transaction.detail);
+            details.push(transaction.category_budget_type || 'Uncategorized');
+            if (transaction.description) {
+              details.push(transaction.description);
+            } else if (transaction.category_name) {
+              details.push(transaction.category_name);
             }
           }
 
-          details.push(new Date(transaction.date).toLocaleString());
-          subtitle.textContent = details.filter(Boolean).join(" • ");
+          const timestamp = new Date(transaction.date);
+          if (!Number.isNaN(timestamp.getTime())) {
+            details.push(timestamp.toLocaleString());
+          }
+
+          subtitle.textContent = details.filter(Boolean).join(' \u2022 ');
 
           infoWrapper.appendChild(title);
           infoWrapper.appendChild(subtitle);
 
-          const amount = document.createElement("span");
-          amount.className =
-            transaction.type === "Income" ? "font-semibold text-emerald-600" : "font-semibold text-slate-700";
+          const amount = document.createElement('span');
+          amount.className = transaction.type === 'Income'
+            ? 'font-semibold text-emerald-600'
+            : 'font-semibold text-slate-700';
           amount.textContent = formatCurrency(transaction.amount);
 
           item.appendChild(infoWrapper);
           item.appendChild(amount);
 
-          list.appendChild(item);
+          transactionsListEl.appendChild(item);
         });
+      }
+
+      function hideTransactionsError() {
+        if (!transactionsErrorEl) {
+          return;
+        }
+        transactionsErrorEl.classList.add('hidden');
+        if (transactionsErrorMessageEl) {
+          transactionsErrorMessageEl.textContent = '';
+        }
+      }
+
+      function showTransactionsError(message) {
+        if (!transactionsErrorEl || !transactionsErrorMessageEl) {
+          return;
+        }
+        transactionsErrorMessageEl.textContent = message || 'Failed to load additional transactions.';
+        transactionsErrorEl.classList.remove('hidden');
+      }
+
+      function updateLoadMoreUI() {
+        if (!transactionsLoadMoreButton || !transactionsEndEl) {
+          return;
+        }
+
+        if (!transactionsState.length) {
+          transactionsLoadMoreButton.classList.add('hidden');
+          transactionsEndEl.classList.add('hidden');
+          return;
+        }
+
+        if (transactionsHasMore && transactionsCursor) {
+          transactionsLoadMoreButton.classList.remove('hidden');
+          transactionsLoadMoreButton.disabled = transactionsIsLoading;
+          transactionsLoadMoreButton.textContent = transactionsIsLoading ? 'Loading…' : 'Load more';
+          transactionsEndEl.classList.add('hidden');
+        } else {
+          transactionsLoadMoreButton.classList.add('hidden');
+          transactionsEndEl.classList.remove('hidden');
+        }
+      }
+
+      function setTransactions(items, nextCursor, hasMore) {
+        transactionsState = Array.isArray(items) ? items.slice(0, 200) : [];
+        transactionsCursor = nextCursor || null;
+        transactionsHasMore = Boolean(nextCursor);
+        hideTransactionsError();
+        renderTransactionsList();
+        updateLoadMoreUI();
+      }
+
+      function appendTransactions(items, nextCursor) {
+        if (!Array.isArray(items) || items.length === 0) {
+          transactionsCursor = nextCursor || null;
+          transactionsHasMore = Boolean(nextCursor);
+          updateLoadMoreUI();
+          return;
+        }
+
+        const existingKeys = new Set(transactionsState.map(createTransactionKey));
+        items.forEach((transaction) => {
+          const key = createTransactionKey(transaction);
+          if (!existingKeys.has(key)) {
+            transactionsState.push(transaction);
+            existingKeys.add(key);
+          }
+        });
+
+        if (transactionsState.length > 200) {
+          transactionsState = transactionsState.slice(0, 200);
+        }
+
+        transactionsCursor = nextCursor || null;
+        transactionsHasMore = Boolean(nextCursor);
+        hideTransactionsError();
+        renderTransactionsList();
+        updateLoadMoreUI();
+      }
+
+      async function handleLoadMore() {
+        if (!transactionsHasMore || !transactionsCursor || transactionsIsLoading) {
+          return;
+        }
+
+        const headers = requireAuthHeaders();
+        if (!headers) {
+          return;
+        }
+
+        transactionsIsLoading = true;
+        hideTransactionsError();
+        updateLoadMoreUI();
+
+        try {
+          const params = new URLSearchParams({ cursor: transactionsCursor, limit: '20' });
+          const response = await fetch(`/api/transactions?${params.toString()}`, { headers });
+
+          if (response.status === 401) {
+            handleUnauthorized();
+            return;
+          }
+
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.message || 'Failed to load additional transactions.');
+          }
+
+          const data = await response.json();
+          appendTransactions(Array.isArray(data.items) ? data.items : [], data.nextCursor || null);
+        } catch (error) {
+          console.error('Load more transactions error:', error);
+          showTransactionsError(error.message);
+        } finally {
+          transactionsIsLoading = false;
+          updateLoadMoreUI();
+        }
       }
 
       async function fetchCategories() {
@@ -463,7 +682,9 @@
           const data = await response.json();
           document.getElementById("total-income").textContent = formatCurrency(data.totalIncome);
           renderBudgets(data.budgets);
-          renderTransactions(data.transactions);
+          setTransactions(Array.isArray(data.transactions) ? data.transactions : [], data.nextCursor || null, data.hasMore);
+          renderBudgetDoughnut(data.budgets);
+          await fetchSpendingByCategory();
         } catch (error) {
           console.error(error);
           setStatus(error.message, true);
@@ -496,6 +717,170 @@
           recurringCache = [];
           renderQuickLog(recurringCache);
         }
+      }
+
+      async function fetchSpendingByCategory() {
+        try {
+          const headers = requireAuthHeaders();
+          if (!headers) {
+            return;
+          }
+
+          const response = await fetch("/api/reports/spending-by-category", { headers });
+          if (response.status === 401) {
+            handleUnauthorized();
+            return;
+          }
+
+          if (!response.ok) {
+            throw new Error("Unable to load category spending.");
+          }
+
+          const data = await response.json();
+          renderSpendingBarChart(Array.isArray(data) ? data : []);
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message, true);
+          renderSpendingBarChart([]);
+        }
+      }
+
+      function renderBudgetDoughnut(budgets) {
+        const canvas = document.getElementById("budgetDoughnutChart");
+        const emptyState = document.getElementById("doughnut-empty-state");
+        if (!canvas || !window.Chart) {
+          return;
+        }
+
+        const necessities = budgets.Necessities?.spent || 0;
+        const leisure = budgets.Leisure?.spent || 0;
+        const savings = budgets.Savings?.spent || 0;
+        const totalSpent = necessities + leisure + savings;
+
+        if (totalSpent === 0) {
+          if (emptyState) {
+            emptyState.classList.remove("hidden");
+          }
+          if (budgetDoughnutRef) {
+            budgetDoughnutRef.destroy();
+            budgetDoughnutRef = null;
+          }
+          return;
+        }
+
+        if (emptyState) {
+          emptyState.classList.add("hidden");
+        }
+
+        if (budgetDoughnutRef) {
+          budgetDoughnutRef.destroy();
+        }
+
+        budgetDoughnutRef = new Chart(canvas, {
+          type: "doughnut",
+          data: {
+            labels: ["Necessities", "Leisure", "Savings"],
+            datasets: [
+              {
+                data: [necessities, leisure, savings],
+                backgroundColor: ["#1D4ED8", "#F59E0B", "#10B981"],
+                borderWidth: 1,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: {
+                position: "bottom",
+              },
+              title: {
+                display: true,
+                text: "This month: spending mix",
+              },
+            },
+          },
+        });
+      }
+
+      function renderSpendingBarChart(data) {
+        const canvas = document.getElementById("spendingBarChart");
+        const emptyState = document.getElementById("bar-empty-state");
+        if (!canvas || !window.Chart) {
+          return;
+        }
+
+        if (!Array.isArray(data) || data.length === 0) {
+          if (emptyState) {
+            emptyState.classList.remove("hidden");
+          }
+          if (spendingBarRef) {
+            spendingBarRef.destroy();
+            spendingBarRef = null;
+          }
+          return;
+        }
+
+        if (emptyState) {
+          emptyState.classList.add("hidden");
+        }
+
+        if (spendingBarRef) {
+          spendingBarRef.destroy();
+        }
+
+        const labels = data.map((item) => item.name);
+        const totals = data.map((item) => item.total);
+
+        spendingBarRef = new Chart(canvas, {
+          type: "bar",
+          data: {
+            labels,
+            datasets: [
+              {
+                label: "Spent",
+                data: totals,
+                backgroundColor: "#6366F1",
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            plugins: {
+              legend: {
+                display: false,
+              },
+              title: {
+                display: true,
+                text: "Spending by category",
+              },
+              tooltip: {
+                callbacks: {
+                  label(context) {
+                    const value = context.parsed.y || 0;
+                    return `${context.dataset.label || "Spent"}: ${formatCurrency(value)}`;
+                  },
+                },
+              },
+            },
+            scales: {
+              x: {
+                ticks: {
+                  callback(value, index) {
+                    const label = labels[index] || "";
+                    if (labels.length > 6) {
+                      return label.length > 10 ? `${label.slice(0, 10)}…` : label;
+                    }
+                    return label;
+                  },
+                },
+              },
+              y: {
+                beginAtZero: true,
+              },
+            },
+          },
+        });
       }
 
       async function logRecurringExpense(template) {
@@ -537,15 +922,25 @@
       }
 
       document.addEventListener("DOMContentLoaded", async () => {
-        const logoutButton = document.getElementById("logout-button");
         const incomeForm = document.getElementById("income-form");
         const expenseForm = document.getElementById("expense-form");
+
+        refreshNavAuthState();
 
         if (logoutButton) {
           logoutButton.addEventListener("click", () => {
             localStorage.removeItem("token");
+            refreshNavAuthState();
             window.location.href = "/login.html";
           });
+        }
+
+        if (transactionsLoadMoreButton) {
+          transactionsLoadMoreButton.addEventListener("click", () => handleLoadMore());
+        }
+
+        if (transactionsErrorRetryButton) {
+          transactionsErrorRetryButton.addEventListener("click", () => handleLoadMore());
         }
 
         incomeForm.addEventListener("submit", async (event) => {
@@ -600,16 +995,21 @@
           const formData = new FormData(expenseForm);
           const amount = Number(formData.get("amount"));
           const description = (formData.get("description") || "").toString().trim();
-          const categoryId = Number.parseInt(formData.get("user_category_id"), 10);
+          const categoryValue = (formData.get("user_category_id") || "").toString();
+          let categoryId = null;
 
           if (!Number.isFinite(amount) || amount <= 0) {
             setStatus("Please enter a valid expense amount greater than zero.", true);
             return;
           }
 
-          if (!Number.isInteger(categoryId) || categoryId <= 0) {
-            setStatus("Please choose a category for this expense.", true);
-            return;
+          if (categoryValue) {
+            const parsedId = Number.parseInt(categoryValue, 10);
+            if (!Number.isInteger(parsedId) || parsedId <= 0) {
+              setStatus("Please choose a valid category for this expense.", true);
+              return;
+            }
+            categoryId = parsedId;
           }
 
           try {
@@ -624,7 +1024,11 @@
             const response = await fetch("/api/expense", {
               method: "POST",
               headers,
-              body: JSON.stringify({ amount, description, user_category_id: categoryId }),
+              body: JSON.stringify(
+                categoryId !== null
+                  ? { amount, description, user_category_id: categoryId }
+                  : { amount, description },
+              ),
             });
 
             if (response.status === 401) {
