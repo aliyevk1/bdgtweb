@@ -13,7 +13,7 @@ BudgetWise is a minimalist budgeting application that helps users balance their 
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/<your-username>/bdgtweb.git
+git clone https://github.com/aliyevk1/bdgtweb.git
 cd bdgtweb
 ```
 
