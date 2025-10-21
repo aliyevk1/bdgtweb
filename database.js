@@ -53,12 +53,12 @@ function initializeDatabase() {
       CREATE TABLE IF NOT EXISTS Expenditure (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
-        user_category_id INTEGER NOT NULL,
+        user_category_id INTEGER,
         amount REAL NOT NULL,
         description TEXT,
         date TEXT NOT NULL,
         FOREIGN KEY (user_id) REFERENCES User(id) ON DELETE CASCADE,
-        FOREIGN KEY (user_category_id) REFERENCES UserCategory(id) ON DELETE RESTRICT
+        FOREIGN KEY (user_category_id) REFERENCES UserCategory(id) ON DELETE SET NULL
       )
     `);
 

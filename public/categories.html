@@ -194,34 +194,6 @@
           : "rounded bg-emerald-100 p-3 text-sm text-emerald-700";
       }
 
-      async function loadCategories() {
-        try {
-          const headers = requireAuthHeaders();
-          if (!headers) {
-            return [];
-          }
-
-          const response = await fetch("/api/categories", { headers });
-          if (response.status === 401) {
-            handleUnauthorized();
-            return [];
-          }
-
-          if (!response.ok) {
-            throw new Error("Unable to load categories.");
-          }
-
-          const categories = await response.json();
-          renderCategoryList(Array.isArray(categories) ? categories : []);
-          return categories;
-        } catch (error) {
-          console.error(error);
-          setStatus(error.message, true);
-          renderCategoryList([]);
-          return [];
-        }
-      }
-
       let categoriesCache = [];
 
       function renderCategoryList(categories) {

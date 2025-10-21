@@ -277,21 +277,28 @@ app.post('/api/expense', authenticate, async (req, res) => {
       return;
     }
 
-    const categoryId = Number.parseInt(userCategoryId, 10);
+    let categoryId = null;
+    let category = null;
 
-    if (!Number.isInteger(categoryId) || categoryId <= 0) {
-      res.status(400).json({ message: 'A valid category is required.' });
-      return;
-    }
+    if (userCategoryId !== undefined && userCategoryId !== null && userCategoryId !== '') {
+      const parsedId = Number.parseInt(userCategoryId, 10);
+      if (!Number.isInteger(parsedId) || parsedId <= 0) {
+        res.status(400).json({ message: 'Invalid category selection.' });
+        return;
+      }
 
-    const category = await get(
-      'SELECT id, name, budget_type FROM UserCategory WHERE id = ? AND user_id = ?',
-      [categoryId, req.userId],
-    );
+      const existingCategory = await get(
+        'SELECT id, name, budget_type FROM UserCategory WHERE id = ? AND user_id = ?',
+        [parsedId, req.userId],
+      );
 
-    if (!category?.id) {
-      res.status(400).json({ message: 'Invalid category selection.' });
-      return;
+      if (!existingCategory?.id) {
+        res.status(400).json({ message: 'Invalid category selection.' });
+        return;
+      }
+
+      categoryId = parsedId;
+      category = existingCategory;
     }
 
     const trimmedDescription = typeof description === 'string' ? description.trim().slice(0, 255) : '';
@@ -438,7 +445,7 @@ app.get('/api/budget/dashboard', authenticate, async (req, res) => {
       `
         SELECT uc.budget_type AS budget_type, COALESCE(SUM(e.amount), 0) AS total
         FROM Expenditure e
-        INNER JOIN UserCategory uc ON uc.id = e.user_category_id
+        LEFT JOIN UserCategory uc ON uc.id = e.user_category_id
         WHERE e.user_id = ? AND e.date >= ? AND e.date < ?
         GROUP BY uc.budget_type
       `,
@@ -464,7 +471,7 @@ app.get('/api/budget/dashboard', authenticate, async (req, res) => {
                uc.name AS category_name,
                uc.budget_type AS category_budget_type
         FROM Expenditure e
-        INNER JOIN UserCategory uc ON uc.id = e.user_category_id
+        LEFT JOIN UserCategory uc ON uc.id = e.user_category_id
         WHERE e.user_id = ? AND e.date >= ? AND e.date < ?
       `,
       [req.userId, startIso, endIso],
@@ -486,8 +493,8 @@ app.get('/api/budget/dashboard', authenticate, async (req, res) => {
           type: 'Expense',
           amount: Number(expense.amount),
           label: expense.category_name || expense.description || 'Expense',
-          budgetType: expense.category_budget_type,
-          detail: expense.description || '',
+          budgetType: expense.category_budget_type || 'Uncategorized',
+          detail: expense.description || (expense.category_name ? expense.category_name : 'Uncategorized'),
           date: expense.date,
         })),
       )

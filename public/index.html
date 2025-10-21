@@ -109,7 +109,7 @@
               class="w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             ></select>
             <p id="category-empty" class="hidden text-xs text-slate-500">
-              No categories yet. Visit the Categories page to add one.
+              No categories yet—expenses will be logged as Uncategorized. Visit the Categories page to add one.
             </p>
           </div>
 
@@ -299,35 +299,31 @@
           return;
         }
 
+        const safeCategories = Array.isArray(categories) ? categories : [];
+
         categorySelect.innerHTML = "";
 
-        if (!categories || categories.length === 0) {
-          categorySelect.disabled = true;
+        const uncategorizedOption = document.createElement("option");
+        uncategorizedOption.value = "";
+        uncategorizedOption.textContent = "Uncategorized (no category)";
+        categorySelect.appendChild(uncategorizedOption);
+
+        if (safeCategories.length > 0) {
           if (categoryEmptyHint) {
-            categoryEmptyHint.classList.remove("hidden");
+            categoryEmptyHint.classList.add("hidden");
           }
-          return;
+        } else if (categoryEmptyHint) {
+          categoryEmptyHint.classList.remove("hidden");
         }
 
-        if (categoryEmptyHint) {
-          categoryEmptyHint.classList.add("hidden");
-        }
-
-        categorySelect.disabled = false;
-
-        const placeholder = document.createElement("option");
-        placeholder.value = "";
-        placeholder.textContent = "Select category";
-        placeholder.disabled = true;
-        placeholder.selected = true;
-        categorySelect.appendChild(placeholder);
-
-        categories.forEach((category) => {
+        safeCategories.forEach((category) => {
           const option = document.createElement("option");
           option.value = category.id;
           option.textContent = `${category.name} (${category.budget_type})`;
           categorySelect.appendChild(option);
         });
+
+        categorySelect.value = "";
       }
 
       function renderTransactions(transactions) {
@@ -600,16 +596,21 @@
           const formData = new FormData(expenseForm);
           const amount = Number(formData.get("amount"));
           const description = (formData.get("description") || "").toString().trim();
-          const categoryId = Number.parseInt(formData.get("user_category_id"), 10);
+          const categoryValue = (formData.get("user_category_id") || "").toString();
+          let categoryId = null;
 
           if (!Number.isFinite(amount) || amount <= 0) {
             setStatus("Please enter a valid expense amount greater than zero.", true);
             return;
           }
 
-          if (!Number.isInteger(categoryId) || categoryId <= 0) {
-            setStatus("Please choose a category for this expense.", true);
-            return;
+          if (categoryValue) {
+            const parsedId = Number.parseInt(categoryValue, 10);
+            if (!Number.isInteger(parsedId) || parsedId <= 0) {
+              setStatus("Please choose a valid category for this expense.", true);
+              return;
+            }
+            categoryId = parsedId;
           }
 
           try {
@@ -624,7 +625,11 @@
             const response = await fetch("/api/expense", {
               method: "POST",
               headers,
-              body: JSON.stringify({ amount, description, user_category_id: categoryId }),
+              body: JSON.stringify(
+                categoryId !== null
+                  ? { amount, description, user_category_id: categoryId }
+                  : { amount, description },
+              ),
             });
 
             if (response.status === 401) {
