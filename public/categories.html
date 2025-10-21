@@ -26,6 +26,28 @@
         </p>
       </header>
 
+      <section class="flex flex-wrap items-center gap-3">
+        <button
+          id="export-template-button"
+          type="button"
+          class="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+        >
+          Export Template
+        </button>
+        <label
+          for="import-template-input"
+          class="cursor-pointer rounded border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 focus-within:outline-none focus-within:ring-2 focus-within:ring-slate-400 focus-within:ring-offset-2"
+        >
+          Import Template
+        </label>
+        <input
+          id="import-template-input"
+          type="file"
+          accept="application/json"
+          class="hidden"
+        />
+      </section>
+
       <section class="grid gap-6 md:grid-cols-2">
         <form id="category-form" class="space-y-4 rounded-lg bg-white p-6 shadow">
           <h2 class="text-xl font-semibold">Add Category</h2>
@@ -37,7 +59,7 @@
               name="name"
               type="text"
               required
-              maxlength="255"
+              maxlength="40"
               class="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
@@ -181,6 +203,8 @@
       }
 
       const statusMessage = document.getElementById("status-message");
+      const exportTemplateButton = document.getElementById("export-template-button");
+      const importTemplateInput = document.getElementById("import-template-input");
       function setStatus(message, isError = false) {
         if (!message) {
           statusMessage.textContent = "";
@@ -455,6 +479,103 @@
         }
       }
 
+      async function exportTemplate() {
+        try {
+          const headers = requireAuthHeaders();
+          if (!headers) {
+            return;
+          }
+
+          const response = await fetch("/api/templates/export", { headers });
+          if (response.status === 401) {
+            handleUnauthorized();
+            return;
+          }
+
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.message || "Failed to export template.");
+          }
+
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          const timestamp = new Date().toISOString().slice(0, 10);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `budgetwise-template-${timestamp}.json`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          window.URL.revokeObjectURL(url);
+          setStatus("Template exported successfully.");
+        } catch (error) {
+          console.error("Export template error:", error);
+          setStatus(error.message, true);
+        }
+      }
+
+      async function importTemplateFromFile(file) {
+        try {
+          if (!file) {
+            return;
+          }
+
+          if (file.size > 1024 * 1024) {
+            throw new Error("Template files must be 1MB or smaller.");
+          }
+
+          const fileText = await file.text();
+          let parsed;
+          try {
+            parsed = JSON.parse(fileText);
+          } catch (parseError) {
+            throw new Error("Selected file is not valid JSON.");
+          }
+
+          const headers = requireAuthHeaders({
+            "Content-Type": "application/json",
+          });
+          if (!headers) {
+            return;
+          }
+
+          const response = await fetch("/api/templates/import", {
+            method: "POST",
+            headers,
+            body: JSON.stringify(parsed),
+          });
+
+          const payload = await response.json().catch(() => ({}));
+
+          if (response.status === 401) {
+            handleUnauthorized();
+            return;
+          }
+
+          if (!response.ok) {
+            throw new Error(payload.message || "Failed to import template.");
+          }
+
+          const insertedCategories = payload?.inserted?.categories ?? 0;
+          const insertedRecurring = payload?.inserted?.recurring ?? 0;
+          const skippedCategories = payload?.skipped?.categories ?? 0;
+          const skippedRecurring = payload?.skipped?.recurring ?? 0;
+
+          setStatus(
+            `Import complete. Categories added: ${insertedCategories} (skipped ${skippedCategories}), Recurring added: ${insertedRecurring} (skipped ${skippedRecurring}).`,
+          );
+          await loadCategories();
+          await loadRecurring();
+        } catch (error) {
+          console.error("Import template error:", error);
+          setStatus(error.message, true);
+        } finally {
+          if (importTemplateInput) {
+            importTemplateInput.value = "";
+          }
+        }
+      }
+
       document.addEventListener("DOMContentLoaded", async () => {
         const logoutButton = document.getElementById("logout-button");
         const form = document.getElementById("category-form");
@@ -575,6 +696,21 @@
             setStatus(error.message, true);
           }
         });
+
+        if (exportTemplateButton) {
+          exportTemplateButton.addEventListener("click", () => {
+            setStatus("");
+            exportTemplate();
+          });
+        }
+
+        if (importTemplateInput) {
+          importTemplateInput.addEventListener("change", (event) => {
+            setStatus("");
+            const [file] = event.target.files || [];
+            importTemplateFromFile(file);
+          });
+        }
 
         await loadCategories();
         await loadRecurring();

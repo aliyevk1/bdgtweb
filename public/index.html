@@ -398,7 +398,7 @@
           }
 
           details.push(new Date(transaction.date).toLocaleString());
-          subtitle.textContent = details.filter(Boolean).join(" â€¢ ");
+          subtitle.textContent = details.filter(Boolean).join(" • ");
 
           infoWrapper.appendChild(title);
           infoWrapper.appendChild(subtitle);
@@ -846,7 +846,6 @@
             renderCategoryOptions(categoriesCache);
             setStatus("Expense recorded successfully.");
             await fetchDashboard();
-            await fetchSpendingByCategory();
           } catch (error) {
             console.error(error);
             setStatus(error.message, true);
@@ -856,8 +855,11 @@
         await fetchCategories();
         await fetchRecurringTemplates();
         await fetchDashboard();
-        await fetchSpendingByCategory();
       });
     </script>
   </body>
 </html>
+
+
+
+

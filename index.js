@@ -16,7 +16,7 @@ const BUDGET_TYPES = new Set(['Necessities', 'Leisure', 'Savings']);
 initializeDatabase();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 function hashPassword(password) {
@@ -122,6 +122,11 @@ app.post('/api/categories', authenticate, async (req, res) => {
       return;
     }
 
+    if (trimmedName.length < 1 || trimmedName.length > 40) {
+      res.status(400).json({ message: 'Category name must be between 1 and 40 characters.' });
+      return;
+    }
+
     if (!BUDGET_TYPES.has(budgetType)) {
       res.status(400).json({ message: 'Invalid budget type.' });
       return;
@@ -137,14 +142,25 @@ app.post('/api/categories', authenticate, async (req, res) => {
       return;
     }
 
+    const existingCountRow = await get(
+      'SELECT COUNT(*) AS count FROM UserCategory WHERE user_id = ?',
+      [req.userId],
+    );
+
+    const existingCount = Number(existingCountRow?.count || 0);
+    if (existingCount >= 50) {
+      res.status(400).json({ message: 'Category limit reached (50).' });
+      return;
+    }
+
     const result = await run(
       'INSERT INTO UserCategory (user_id, name, budget_type) VALUES (?, ?, ?)',
-      [req.userId, trimmedName.slice(0, 255), budgetType],
+      [req.userId, trimmedName, budgetType],
     );
 
     res.status(201).json({
       id: result.lastID,
-      name: trimmedName.slice(0, 255),
+      name: trimmedName,
       budget_type: budgetType,
     });
   } catch (error) {
@@ -326,7 +342,7 @@ app.post('/api/expense', authenticate, async (req, res) => {
 app.post('/api/recurring', authenticate, async (req, res) => {
   try {
     const { description, default_amount: defaultAmount, user_category_id: userCategoryId } = req.body;
-    const trimmedDescription = typeof description === 'string' ? description.trim().slice(0, 255) : '';
+    const trimmedDescription = typeof description === 'string' ? description.trim() : '';
     const numericAmount = Number(defaultAmount);
     const categoryId = Number.parseInt(userCategoryId, 10);
 
@@ -335,8 +351,19 @@ app.post('/api/recurring', authenticate, async (req, res) => {
       return;
     }
 
+    if (trimmedDescription.length > 255) {
+      res.status(400).json({ message: 'Description must be 255 characters or fewer.' });
+      return;
+    }
+
     if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
       res.status(400).json({ message: 'Amount must be a positive number.' });
+      return;
+    }
+
+    const normalizedAmount = Math.round(numericAmount * 100) / 100;
+    if (Math.abs(normalizedAmount - numericAmount) > 1e-8) {
+      res.status(400).json({ message: 'Amount must have at most two decimal places.' });
       return;
     }
 
@@ -355,15 +382,25 @@ app.post('/api/recurring', authenticate, async (req, res) => {
       return;
     }
 
+    const recurringCountRow = await get(
+      'SELECT COUNT(*) AS count FROM RecurringExpenditure WHERE user_id = ?',
+      [req.userId],
+    );
+    const recurringCount = Number(recurringCountRow?.count || 0);
+    if (recurringCount >= 50) {
+      res.status(400).json({ message: 'Recurring template limit reached (50).' });
+      return;
+    }
+
     const result = await run(
       'INSERT INTO RecurringExpenditure (user_id, user_category_id, description, default_amount) VALUES (?, ?, ?, ?)',
-      [req.userId, categoryId, trimmedDescription, numericAmount],
+      [req.userId, categoryId, trimmedDescription, normalizedAmount],
     );
 
     res.status(201).json({
       id: result.lastID,
       description: trimmedDescription,
-      default_amount: numericAmount,
+      default_amount: normalizedAmount,
       user_category_id: categoryId,
       category,
     });
@@ -425,6 +462,282 @@ app.get('/api/reports/spending-by-category', authenticate, async (req, res) => {
   } catch (error) {
     console.error('Failed to load spending by category:', error);
     res.status(500).json({ message: 'Failed to load spending by category.' });
+  }
+});
+
+app.get('/api/templates/export', authenticate, async (req, res) => {
+  try {
+    const categories = await all(
+      `
+        SELECT name, budget_type
+        FROM UserCategory
+        WHERE user_id = ?
+        ORDER BY name COLLATE NOCASE
+      `,
+      [req.userId],
+    );
+
+    const recurring = await all(
+      `
+        SELECT r.description, r.default_amount, uc.name AS category_name
+        FROM RecurringExpenditure r
+        LEFT JOIN UserCategory uc ON uc.id = r.user_category_id
+        WHERE r.user_id = ?
+        ORDER BY r.description COLLATE NOCASE
+      `,
+      [req.userId],
+    );
+
+    const payload = {
+      version: '1.0',
+      generatedAt: new Date().toISOString(),
+      categories: categories.map((category) => ({
+        name: category.name,
+        budget_type: category.budget_type,
+      })),
+      recurring: recurring
+        .filter((item) => item.category_name)
+        .map((item) => ({
+          description: item.description,
+          default_amount: Number(item.default_amount),
+          category_name: item.category_name,
+        })),
+    };
+
+    const fileName = `budgetwise-template-${new Date().toISOString().slice(0, 10)}.json`;
+    res.set({
+      'Content-Type': 'application/json',
+      'Content-Disposition': `attachment; filename="${fileName}"`,
+    });
+    res.send(`${JSON.stringify(payload, null, 2)}\n`);
+  } catch (error) {
+    console.error('Failed to export template:', error);
+    res.status(500).json({ message: 'Failed to export template.' });
+  }
+});
+
+app.post('/api/templates/import', authenticate, async (req, res) => {
+  try {
+    const payload = req.body;
+
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      res.status(400).json({ message: 'Invalid template payload.' });
+      return;
+    }
+
+    const { version, categories = [], recurring = [] } = payload;
+
+    if (version !== '1.0') {
+      res.status(400).json({ message: 'Unsupported template version.' });
+      return;
+    }
+
+    if (!Array.isArray(categories) || categories.length > 100) {
+      res.status(400).json({ message: 'Invalid categories list (max 100).' });
+      return;
+    }
+
+    if (!Array.isArray(recurring) || recurring.length > 200) {
+      res.status(400).json({ message: 'Invalid recurring list (max 200).' });
+      return;
+    }
+
+    const payloadCategoryMap = new Map();
+    let skippedCategoryDuplicates = 0;
+    categories.forEach((item, index) => {
+      if (!item || typeof item !== 'object') {
+        throw Object.assign(new Error('Invalid category entry.'), { statusCode: 400 });
+      }
+      const name = typeof item.name === 'string' ? item.name.trim() : '';
+      const budgetType = item.budget_type;
+
+      if (!name || name.length > 40) {
+        throw Object.assign(new Error(`Category name at index ${index} must be 1-40 characters.`), { statusCode: 400 });
+      }
+
+      if (!BUDGET_TYPES.has(budgetType)) {
+        throw Object.assign(new Error(`Invalid budget type for category "${name}".`), { statusCode: 400 });
+      }
+
+      const key = name.toLowerCase();
+      if (payloadCategoryMap.has(key)) {
+        skippedCategoryDuplicates += 1;
+        return;
+      }
+
+      payloadCategoryMap.set(key, { name, budget_type: budgetType });
+    });
+
+    const normalizedRecurring = [];
+    const recurringPayloadKeys = new Set();
+    let recurringDuplicateCount = 0;
+
+    recurring.forEach((item, index) => {
+      if (!item || typeof item !== 'object') {
+        throw Object.assign(new Error('Invalid recurring entry.'), { statusCode: 400 });
+      }
+
+      const description =
+        typeof item.description === 'string' ? item.description.trim() : '';
+      const amountValue = Number(item.default_amount);
+      const categoryName =
+        typeof item.category_name === 'string' ? item.category_name.trim() : '';
+
+      if (!description) {
+        throw Object.assign(new Error(`Recurring description at index ${index} is required.`), { statusCode: 400 });
+      }
+
+      if (description.length > 255) {
+        throw Object.assign(new Error(`Recurring description "${description}" is too long (max 255).`), {
+          statusCode: 400,
+        });
+      }
+
+      if (!Number.isFinite(amountValue) || amountValue <= 0) {
+        throw Object.assign(new Error(`Recurring amount for "${description}" must be positive.`), { statusCode: 400 });
+      }
+
+      const normalizedAmount = Math.round(amountValue * 100) / 100;
+      if (Math.abs(normalizedAmount - amountValue) > 1e-8) {
+        throw Object.assign(new Error(`Recurring amount for "${description}" must have at most two decimals.`), {
+          statusCode: 400,
+        });
+      }
+
+      if (!categoryName) {
+        throw Object.assign(new Error(`Recurring entry "${description}" must reference a category name.`), {
+          statusCode: 400,
+        });
+      }
+
+      const categoryKey = categoryName.toLowerCase();
+      if (!payloadCategoryMap.has(categoryKey)) {
+        throw Object.assign(
+          new Error(`Recurring entry "${description}" references unknown category "${categoryName}".`),
+          { statusCode: 400 },
+        );
+      }
+
+      const dedupeKey = `${description.toLowerCase()}|${normalizedAmount.toFixed(2)}|${categoryKey}`;
+      if (recurringPayloadKeys.has(dedupeKey)) {
+        recurringDuplicateCount += 1;
+        return;
+      }
+      recurringPayloadKeys.add(dedupeKey);
+      normalizedRecurring.push({
+        description,
+        amount: normalizedAmount,
+        categoryKey,
+      });
+    });
+
+    const existingCategories = await all(
+      'SELECT id, name FROM UserCategory WHERE user_id = ?',
+      [req.userId],
+    );
+
+    const categoryMap = new Map();
+    existingCategories.forEach((category) => {
+      categoryMap.set(category.name.toLowerCase(), { id: category.id, name: category.name });
+    });
+
+    const existingCategoryCount = existingCategories.length;
+    const potentialNewCategories = Array.from(payloadCategoryMap.entries()).filter(
+      ([key]) => !categoryMap.has(key),
+    );
+
+    if (existingCategoryCount + potentialNewCategories.length > 50) {
+      res.status(400).json({ message: 'Import would exceed the category limit (50).' });
+      return;
+    }
+
+    const existingRecurringRows = await all(
+      'SELECT description, default_amount, user_category_id FROM RecurringExpenditure WHERE user_id = ?',
+      [req.userId],
+    );
+
+    const existingRecurringSet = new Set(
+      existingRecurringRows.map((row) => `${row.description.toLowerCase()}|${Number(row.default_amount).toFixed(2)}|${row.user_category_id}`),
+    );
+
+    if (existingRecurringRows.length + normalizedRecurring.length > 50) {
+      res.status(400).json({ message: 'Import would exceed the recurring template limit (50).' });
+      return;
+    }
+
+    let insertedCategories = 0;
+    let skippedCategories = skippedCategoryDuplicates;
+    let insertedRecurring = 0;
+    let skippedRecurring = recurringDuplicateCount;
+
+    try {
+      await run('BEGIN TRANSACTION');
+
+      for (const [key, cat] of potentialNewCategories) {
+        const result = await run(
+          'INSERT INTO UserCategory (user_id, name, budget_type) VALUES (?, ?, ?)',
+          [req.userId, cat.name, cat.budget_type],
+        );
+        categoryMap.set(key, { id: result.lastID, name: cat.name });
+        insertedCategories += 1;
+      }
+
+      // Existing categories from payload that already existed should be counted as skipped
+      skippedCategories += payloadCategoryMap.size - potentialNewCategories.length;
+
+      for (const recurringItem of normalizedRecurring) {
+        const categoryRecord = categoryMap.get(recurringItem.categoryKey);
+        if (!categoryRecord) {
+          throw Object.assign(
+            new Error(`Category mapping failed for "${recurringItem.categoryKey}".`),
+            { statusCode: 500 },
+          );
+        }
+
+        const key = `${recurringItem.description.toLowerCase()}|${recurringItem.amount.toFixed(2)}|${categoryRecord.id}`;
+        if (existingRecurringSet.has(key)) {
+          skippedRecurring += 1;
+          continue;
+        }
+
+        await run(
+          'INSERT INTO RecurringExpenditure (user_id, user_category_id, description, default_amount) VALUES (?, ?, ?, ?)',
+          [req.userId, categoryRecord.id, recurringItem.description, recurringItem.amount],
+        );
+        existingRecurringSet.add(key);
+        insertedRecurring += 1;
+      }
+
+      await run('COMMIT');
+    } catch (transactionError) {
+      await run('ROLLBACK');
+      if (transactionError?.statusCode === 500) {
+        throw transactionError;
+      }
+      throw transactionError;
+    }
+
+    res.json({
+      inserted: {
+        categories: insertedCategories,
+        recurring: insertedRecurring,
+      },
+      skipped: {
+        categories: skippedCategories,
+        recurring: skippedRecurring,
+      },
+    });
+  } catch (error) {
+    if (error?.statusCode) {
+      res.status(error.statusCode).json({ message: error.message });
+      return;
+    }
+    if (error?.type === 'entity.too.large' || error?.message?.includes('payload too large')) {
+      res.status(413).json({ message: 'Template exceeds 1MB limit.' });
+      return;
+    }
+    console.error('Failed to import template:', error);
+    res.status(500).json({ message: 'Failed to import template.' });
   }
 });
 
