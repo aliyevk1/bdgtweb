@@ -12,8 +12,8 @@
     <div class="mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-4 py-10">
       <nav class="flex items-center justify-end gap-3 text-sm font-medium">
         <a class="text-slate-600 hover:underline" href="/categories.html">Categories</a>
-        <a class="text-blue-600 hover:underline" href="/register.html">Register</a>
-        <a class="text-slate-600 hover:underline" href="/login.html">Login</a>
+        <a id="register-link" class="text-blue-600 hover:underline" href="/register.html">Register</a>
+        <a id="login-link" class="text-slate-600 hover:underline" href="/login.html">Login</a>
         <button
           id="logout-button"
           type="button"
@@ -193,6 +193,17 @@
         </div>
 
         <div class="rounded-lg bg-white p-6 shadow">
+          <h2 class="text-xl font-semibold">Quick Log</h2>
+          <p class="mt-2 text-sm text-slate-500">
+            Tap a template to record it instantly.
+          </p>
+          <div id="quick-log-container" class="mt-4 flex flex-wrap gap-3"></div>
+          <p id="quick-log-empty" class="mt-4 text-sm text-slate-500">
+            No recurring templates yet. Create one on the Categories page.
+          </p>
+        </div>
+
+        <div class="rounded-lg bg-white p-6 shadow">
           <h2 class="text-xl font-semibold">Recent Activity</h2>
           <ul id="transactions-list" class="mt-4 divide-y divide-slate-200"></ul>
           <p id="transactions-empty" class="mt-4 text-sm text-slate-500">
@@ -230,17 +241,6 @@
           </p>
         </div>
 
-        <div class="rounded-lg bg-white p-6 shadow">
-          <h2 class="text-xl font-semibold">Quick Log</h2>
-          <p class="mt-2 text-sm text-slate-500">
-            Tap a template to record it instantly.
-          </p>
-          <div id="quick-log-container" class="mt-4 flex flex-wrap gap-3"></div>
-          <p id="quick-log-empty" class="mt-4 text-sm text-slate-500">
-            No recurring templates yet. Create one on the Categories page.
-          </p>
-        </div>
-
         <div class="grid gap-6 md:grid-cols-2">
           <div class="rounded-lg bg-white p-6 shadow">
             <h2 class="text-xl font-semibold">This Month: Spending Mix</h2>
@@ -274,16 +274,31 @@
     </div>
 
     <script>
-      const existingToken = localStorage.getItem("token");
-      if (!existingToken) {
-        window.location.href = "/login.html";
+      const registerLink = document.getElementById("register-link");
+      const loginLink = document.getElementById("login-link");
+      const logoutButton = document.getElementById("logout-button");
+
+      function refreshNavAuthState() {
+        const hasToken = Boolean(localStorage.getItem("token"));
+        if (registerLink) {
+          registerLink.classList.toggle("hidden", hasToken);
+        }
+        if (loginLink) {
+          loginLink.classList.toggle("hidden", hasToken);
+        }
+        if (logoutButton) {
+          logoutButton.classList.toggle("hidden", !hasToken);
+        }
       }
+
+      refreshNavAuthState();
 
       const currencyFormatter = new Intl.NumberFormat("en-US", {
         style: "currency",
         currency: "USD",
         minimumFractionDigits: 2,
-      });      const categorySelect = document.getElementById("category-select");
+      });
+      const categorySelect = document.getElementById("category-select");
       const categoryEmptyHint = document.getElementById("category-empty");
       const transactionsListEl = document.getElementById("transactions-list");
       const transactionsEmptyEl = document.getElementById("transactions-empty");
@@ -305,6 +320,7 @@
 
       function handleUnauthorized() {
         localStorage.removeItem("token");
+        refreshNavAuthState();
         window.location.href = "/login.html";
       }
 
@@ -504,7 +520,7 @@
         if (transactionsHasMore && transactionsCursor) {
           transactionsLoadMoreButton.classList.remove('hidden');
           transactionsLoadMoreButton.disabled = transactionsIsLoading;
-          transactionsLoadMoreButton.textContent = transactionsIsLoading ? 'Loading…' : 'Load more';
+          transactionsLoadMoreButton.textContent = transactionsIsLoading ? 'Loadingâ€¦' : 'Load more';
           transactionsEndEl.classList.add('hidden');
         } else {
           transactionsLoadMoreButton.classList.add('hidden');
@@ -906,13 +922,15 @@
       }
 
       document.addEventListener("DOMContentLoaded", async () => {
-        const logoutButton = document.getElementById("logout-button");
         const incomeForm = document.getElementById("income-form");
         const expenseForm = document.getElementById("expense-form");
+
+        refreshNavAuthState();
 
         if (logoutButton) {
           logoutButton.addEventListener("click", () => {
             localStorage.removeItem("token");
+            refreshNavAuthState();
             window.location.href = "/login.html";
           });
         }
@@ -1040,20 +1058,3 @@
     </script>
   </body>
 </html>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
