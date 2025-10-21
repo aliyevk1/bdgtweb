@@ -11,6 +11,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'my-super-secret-key';
 const TOKEN_EXPIRY = '7d';
+const BUDGET_TYPES = new Set(['Necessities', 'Leisure', 'Savings']);
 
 initializeDatabase();
 
@@ -111,6 +112,98 @@ app.post('/api/users/register', async (req, res) => {
   }
 });
 
+app.post('/api/categories', authenticate, async (req, res) => {
+  try {
+    const { name, budget_type: budgetType } = req.body;
+    const trimmedName = typeof name === 'string' ? name.trim() : '';
+
+    if (!trimmedName) {
+      res.status(400).json({ message: 'Category name is required.' });
+      return;
+    }
+
+    if (!BUDGET_TYPES.has(budgetType)) {
+      res.status(400).json({ message: 'Invalid budget type.' });
+      return;
+    }
+
+    const existing = await get(
+      'SELECT id FROM UserCategory WHERE user_id = ? AND LOWER(name) = LOWER(?)',
+      [req.userId, trimmedName],
+    );
+
+    if (existing?.id) {
+      res.status(409).json({ message: 'Category name already exists.' });
+      return;
+    }
+
+    const result = await run(
+      'INSERT INTO UserCategory (user_id, name, budget_type) VALUES (?, ?, ?)',
+      [req.userId, trimmedName.slice(0, 255), budgetType],
+    );
+
+    res.status(201).json({
+      id: result.lastID,
+      name: trimmedName.slice(0, 255),
+      budget_type: budgetType,
+    });
+  } catch (error) {
+    console.error('Failed to create category:', error);
+    res.status(500).json({ message: 'Failed to create category.' });
+  }
+});
+
+app.get('/api/categories', authenticate, async (req, res) => {
+  try {
+    const categories = await all(
+      'SELECT id, name, budget_type FROM UserCategory WHERE user_id = ? ORDER BY name COLLATE NOCASE',
+      [req.userId],
+    );
+
+    res.json(categories);
+  } catch (error) {
+    console.error('Failed to load categories:', error);
+    res.status(500).json({ message: 'Failed to load categories.' });
+  }
+});
+
+app.delete('/api/categories/:id', authenticate, async (req, res) => {
+  try {
+    const categoryId = Number.parseInt(req.params.id, 10);
+
+    if (!Number.isInteger(categoryId) || categoryId <= 0) {
+      res.status(400).json({ message: 'Invalid category id.' });
+      return;
+    }
+
+    const category = await get(
+      'SELECT id FROM UserCategory WHERE id = ? AND user_id = ?',
+      [categoryId, req.userId],
+    );
+
+    if (!category?.id) {
+      res.status(404).json({ message: 'Category not found.' });
+      return;
+    }
+
+    const usage = await get(
+      'SELECT COUNT(*) AS total FROM Expenditure WHERE user_id = ? AND user_category_id = ?',
+      [req.userId, categoryId],
+    );
+
+    if ((usage?.total || 0) > 0) {
+      res.status(400).json({ message: 'Cannot delete a category that has expenses.' });
+      return;
+    }
+
+    await run('DELETE FROM UserCategory WHERE id = ? AND user_id = ?', [categoryId, req.userId]);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Failed to delete category:', error);
+    res.status(500).json({ message: 'Failed to delete category.' });
+  }
+});
+
 app.post('/api/users/login', async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -176,17 +269,28 @@ app.post('/api/income', authenticate, async (req, res) => {
 
 app.post('/api/expense', authenticate, async (req, res) => {
   try {
-    const { amount, description, budget_type: budgetType } = req.body;
+    const { amount, description, user_category_id: userCategoryId } = req.body;
     const numericAmount = Number(amount);
-    const allowedTypes = new Set(['Necessities', 'Leisure', 'Savings']);
 
     if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
       res.status(400).json({ message: 'Amount must be a positive number.' });
       return;
     }
 
-    if (!allowedTypes.has(budgetType)) {
-      res.status(400).json({ message: 'Invalid budget type.' });
+    const categoryId = Number.parseInt(userCategoryId, 10);
+
+    if (!Number.isInteger(categoryId) || categoryId <= 0) {
+      res.status(400).json({ message: 'A valid category is required.' });
+      return;
+    }
+
+    const category = await get(
+      'SELECT id, name, budget_type FROM UserCategory WHERE id = ? AND user_id = ?',
+      [categoryId, req.userId],
+    );
+
+    if (!category?.id) {
+      res.status(400).json({ message: 'Invalid category selection.' });
       return;
     }
 
@@ -194,15 +298,16 @@ app.post('/api/expense', authenticate, async (req, res) => {
     const timestamp = new Date().toISOString();
 
     const result = await run(
-      'INSERT INTO Expenditure (user_id, amount, description, budget_type, date) VALUES (?, ?, ?, ?, ?)',
-      [req.userId, numericAmount, trimmedDescription, budgetType, timestamp],
+      'INSERT INTO Expenditure (user_id, user_category_id, amount, description, date) VALUES (?, ?, ?, ?, ?)',
+      [req.userId, categoryId, numericAmount, trimmedDescription, timestamp],
     );
 
     res.status(201).json({
       id: result.lastID,
       amount: numericAmount,
       description: trimmedDescription,
-      budget_type: budgetType,
+      user_category_id: categoryId,
+      category,
       date: timestamp,
     });
   } catch (error) {
@@ -221,25 +326,45 @@ app.get('/api/budget/dashboard', authenticate, async (req, res) => {
     );
     const totalIncome = Number(totalIncomeRow?.total || 0);
 
-    const categories = ['Necessities', 'Leisure', 'Savings'];
-    const spentByCategory = {};
+    const spentByCategory = {
+      Necessities: 0,
+      Leisure: 0,
+      Savings: 0,
+    };
 
-    await Promise.all(
-      categories.map(async (category) => {
-        const row = await get(
-          'SELECT COALESCE(SUM(amount), 0) AS total FROM Expenditure WHERE user_id = ? AND budget_type = ? AND date >= ? AND date < ?',
-          [req.userId, category, startIso, endIso],
-        );
-        spentByCategory[category] = Number(row?.total || 0);
-      }),
+    const spendingRows = await all(
+      `
+        SELECT uc.budget_type AS budget_type, COALESCE(SUM(e.amount), 0) AS total
+        FROM Expenditure e
+        INNER JOIN UserCategory uc ON uc.id = e.user_category_id
+        WHERE e.user_id = ? AND e.date >= ? AND e.date < ?
+        GROUP BY uc.budget_type
+      `,
+      [req.userId, startIso, endIso],
     );
+
+    spendingRows.forEach((row) => {
+      if (row?.budget_type && spentByCategory[row.budget_type] !== undefined) {
+        spentByCategory[row.budget_type] = Number(row.total || 0);
+      }
+    });
 
     const incomes = await all(
       'SELECT id, amount, source, date FROM Income WHERE user_id = ? AND date >= ? AND date < ?',
       [req.userId, startIso, endIso],
     );
     const expenses = await all(
-      'SELECT id, amount, description, budget_type, date FROM Expenditure WHERE user_id = ? AND date >= ? AND date < ?',
+      `
+        SELECT e.id,
+               e.amount,
+               e.description,
+               e.date,
+               uc.name AS category_name,
+               uc.budget_type AS category_budget_type
+        FROM Expenditure e
+        INNER JOIN UserCategory uc ON uc.id = e.user_category_id
+        WHERE e.user_id = ? AND e.date >= ? AND e.date < ?
+      `,
       [req.userId, startIso, endIso],
     );
 
@@ -250,14 +375,17 @@ app.get('/api/budget/dashboard', authenticate, async (req, res) => {
         type: 'Income',
         amount: Number(income.amount),
         label: income.source || 'Income',
+        detail: 'Income',
         date: income.date,
       }))
       .concat(
         expenses.map((expense) => ({
           id: `expense-${expense.id}`,
-          type: expense.budget_type,
+          type: 'Expense',
           amount: Number(expense.amount),
-          label: expense.description || 'Expense',
+          label: expense.category_name || expense.description || 'Expense',
+          budgetType: expense.category_budget_type,
+          detail: expense.description || '',
           date: expense.date,
         })),
       )

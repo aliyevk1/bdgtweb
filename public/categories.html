@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Categories | BudgetWise</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-slate-50 text-slate-900">
+    <div class="mx-auto flex min-h-screen max-w-4xl flex-col gap-8 px-4 py-10">
+      <nav class="flex items-center justify-between text-sm font-medium">
+        <a class="text-blue-600 hover:underline" href="/index.html">Back to Dashboard</a>
+        <button
+          id="logout-button"
+          class="rounded border border-slate-300 px-3 py-1 text-slate-700 hover:bg-slate-100"
+          type="button"
+        >
+          Logout
+        </button>
+      </nav>
+
+      <header>
+        <h1 class="text-3xl font-semibold">Manage Categories</h1>
+        <p class="mt-2 text-sm text-slate-600">
+          Create personalized spending categories and map them to the 50/30/20 budget buckets.
+        </p>
+      </header>
+
+      <section class="grid gap-6 md:grid-cols-2">
+        <form id="category-form" class="space-y-4 rounded-lg bg-white p-6 shadow">
+          <h2 class="text-xl font-semibold">Add Category</h2>
+
+          <div>
+            <label class="block text-sm font-medium text-slate-700" for="category-name">Name</label>
+            <input
+              id="category-name"
+              name="name"
+              type="text"
+              required
+              maxlength="255"
+              class="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-slate-700" for="category-type">Budget Bucket</label>
+            <select
+              id="category-type"
+              name="budget_type"
+              required
+              class="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="Necessities">Necessities (50%)</option>
+              <option value="Leisure">Leisure (30%)</option>
+              <option value="Savings">Savings (20%)</option>
+            </select>
+          </div>
+
+          <button
+            type="submit"
+            class="w-full rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+          >
+            Create Category
+          </button>
+        </form>
+
+        <div class="rounded-lg bg-white p-6 shadow">
+          <h2 class="text-xl font-semibold">Your Categories</h2>
+          <p class="mt-2 text-sm text-slate-500">
+            Categories cannot be deleted while they have expenses associated with them.
+          </p>
+
+          <ul id="category-list" class="mt-4 divide-y divide-slate-200"></ul>
+          <p id="category-empty-state" class="mt-4 text-sm text-slate-500">
+            No categories yet. Add your first one using the form.
+          </p>
+        </div>
+      </section>
+
+      <p id="status-message" class="hidden rounded p-3 text-sm"></p>
+    </div>
+
+    <script>
+      const existingToken = localStorage.getItem("token");
+      if (!existingToken) {
+        window.location.href = "/login.html";
+      }
+
+      function handleUnauthorized() {
+        localStorage.removeItem("token");
+        window.location.href = "/login.html";
+      }
+
+      function requireAuthHeaders(extraHeaders = {}) {
+        const token = localStorage.getItem("token");
+        if (!token) {
+          handleUnauthorized();
+          return null;
+        }
+
+        return {
+          ...extraHeaders,
+          Authorization: `Bearer ${token}`,
+        };
+      }
+
+      const statusMessage = document.getElementById("status-message");
+      function setStatus(message, isError = false) {
+        if (!message) {
+          statusMessage.textContent = "";
+          statusMessage.className = "hidden";
+          return;
+        }
+
+        statusMessage.textContent = message;
+        statusMessage.className = isError
+          ? "rounded bg-red-100 p-3 text-sm text-red-700"
+          : "rounded bg-emerald-100 p-3 text-sm text-emerald-700";
+      }
+
+      async function loadCategories() {
+        try {
+          const headers = requireAuthHeaders();
+          if (!headers) {
+            return [];
+          }
+
+          const response = await fetch("/api/categories", { headers });
+          if (response.status === 401) {
+            handleUnauthorized();
+            return [];
+          }
+
+          if (!response.ok) {
+            throw new Error("Unable to load categories.");
+          }
+
+          const categories = await response.json();
+          renderCategoryList(Array.isArray(categories) ? categories : []);
+          return categories;
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message, true);
+          renderCategoryList([]);
+          return [];
+        }
+      }
+
+      function renderCategoryList(categories) {
+        const list = document.getElementById("category-list");
+        const emptyState = document.getElementById("category-empty-state");
+
+        list.innerHTML = "";
+
+        if (!categories || categories.length === 0) {
+          emptyState.classList.remove("hidden");
+          return;
+        }
+
+        emptyState.classList.add("hidden");
+
+        categories.forEach((category) => {
+          const item = document.createElement("li");
+          item.className = "flex items-center justify-between gap-4 py-3";
+
+          const meta = document.createElement("div");
+          meta.className = "flex flex-col";
+
+          const name = document.createElement("span");
+          name.className = "font-medium";
+          name.textContent = category.name;
+
+          const badge = document.createElement("span");
+          badge.className = "text-xs uppercase tracking-wide text-slate-500";
+          badge.textContent = category.budget_type;
+
+          meta.appendChild(name);
+          meta.appendChild(badge);
+
+          const deleteButton = document.createElement("button");
+          deleteButton.className =
+            "rounded border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50";
+          deleteButton.type = "button";
+          deleteButton.textContent = "Delete";
+          deleteButton.addEventListener("click", async () => {
+            const confirmed = window.confirm(
+              `Delete "${category.name}"? Expenses linked to this category must be removed first.`,
+            );
+            if (!confirmed) {
+              return;
+            }
+
+            try {
+              const headers = requireAuthHeaders();
+              if (!headers) {
+                return;
+              }
+
+              const response = await fetch(`/api/categories/${category.id}`, {
+                method: "DELETE",
+                headers,
+              });
+
+              if (response.status === 401) {
+                handleUnauthorized();
+                return;
+              }
+
+              if (response.status === 400) {
+                const payload = await response.json().catch(() => ({}));
+                throw new Error(payload.message || "Cannot delete category with expenses.");
+              }
+
+              if (!response.ok && response.status !== 204) {
+                const payload = await response.json().catch(() => ({}));
+                throw new Error(payload.message || "Failed to delete category.");
+              }
+
+              setStatus("Category deleted.");
+              await loadCategories();
+            } catch (error) {
+              console.error("Delete category error:", error);
+              setStatus(error.message, true);
+            }
+          });
+
+          item.appendChild(meta);
+          item.appendChild(deleteButton);
+          list.appendChild(item);
+        });
+      }
+
+      document.addEventListener("DOMContentLoaded", async () => {
+        const logoutButton = document.getElementById("logout-button");
+        const form = document.getElementById("category-form");
+
+        if (logoutButton) {
+          logoutButton.addEventListener("click", () => {
+            localStorage.removeItem("token");
+            window.location.href = "/login.html";
+          });
+        }
+
+        form.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          setStatus("");
+
+          const formData = new FormData(form);
+          const name = (formData.get("name") || "").toString().trim();
+          const budgetType = formData.get("budget_type");
+
+          if (!name) {
+            setStatus("Please provide a category name.", true);
+            return;
+          }
+
+          try {
+            const headers = requireAuthHeaders({
+              "Content-Type": "application/json",
+            });
+
+            if (!headers) {
+              return;
+            }
+
+            const response = await fetch("/api/categories", {
+              method: "POST",
+              headers,
+              body: JSON.stringify({ name, budget_type: budgetType }),
+            });
+
+            if (response.status === 401) {
+              handleUnauthorized();
+              return;
+            }
+
+            const payload = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+              const message = payload.message || "Failed to create category.";
+              throw new Error(message);
+            }
+
+            form.reset();
+            setStatus(`"${payload.name}" added to ${payload.budget_type}.`);
+            await loadCategories();
+          } catch (error) {
+            console.error("Create category error:", error);
+            setStatus(error.message, true);
+          }
+        });
+
+        await loadCategories();
+      });
+    </script>
+  </body>
+</html>

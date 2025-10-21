@@ -28,6 +28,17 @@ function initializeDatabase() {
     `);
 
     db.run(`
+      CREATE TABLE IF NOT EXISTS UserCategory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        budget_type TEXT NOT NULL CHECK (budget_type IN ('Necessities', 'Leisure', 'Savings')),
+        UNIQUE (user_id, name COLLATE NOCASE),
+        FOREIGN KEY (user_id) REFERENCES User(id) ON DELETE CASCADE
+      )
+    `);
+
+    db.run(`
       CREATE TABLE IF NOT EXISTS Income (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
@@ -42,11 +53,12 @@ function initializeDatabase() {
       CREATE TABLE IF NOT EXISTS Expenditure (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL,
+        user_category_id INTEGER NOT NULL,
         amount REAL NOT NULL,
         description TEXT,
-        budget_type TEXT NOT NULL CHECK(budget_type IN ('Necessities', 'Leisure', 'Savings')),
         date TEXT NOT NULL,
-        FOREIGN KEY (user_id) REFERENCES User(id) ON DELETE CASCADE
+        FOREIGN KEY (user_id) REFERENCES User(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_category_id) REFERENCES UserCategory(id) ON DELETE RESTRICT
       )
     `);
   });

@@ -10,7 +10,9 @@
   <body class="bg-slate-50 text-slate-900">
     <div class="mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-4 py-10">
       <nav class="flex items-center justify-end gap-3 text-sm font-medium">
+        <a class="text-slate-600 hover:underline" href="/categories.html">Categories</a>
         <a class="text-blue-600 hover:underline" href="/register.html">Register</a>
+        <a class="text-slate-600 hover:underline" href="/login.html">Login</a>
         <button
           id="logout-button"
           type="button"
@@ -97,19 +99,18 @@
               class="w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
 
-            <label class="block text-sm font-medium text-slate-700" for="expense-type"
-              >Budget Type</label
+            <label class="block text-sm font-medium text-slate-700" for="category-select"
+              >Category</label
             >
             <select
-              id="expense-type"
-              name="budget_type"
+              id="category-select"
+              name="user_category_id"
               required
               class="w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            >
-              <option value="Necessities">Necessities</option>
-              <option value="Leisure">Leisure</option>
-              <option value="Savings">Savings</option>
-            </select>
+            ></select>
+            <p id="category-empty" class="hidden text-xs text-slate-500">
+              No categories yet. Visit the Categories page to add one.
+            </p>
           </div>
 
           <button
@@ -212,6 +213,10 @@
         minimumFractionDigits: 2,
       });
 
+      const categorySelect = document.getElementById("category-select");
+      const categoryEmptyHint = document.getElementById("category-empty");
+      let categoriesCache = [];
+
       function formatCurrency(value) {
         return currencyFormatter.format(Number.isFinite(value) ? value : 0);
       }
@@ -277,6 +282,42 @@
         });
       }
 
+      function renderCategoryOptions(categories) {
+        if (!categorySelect) {
+          return;
+        }
+
+        categorySelect.innerHTML = "";
+
+        if (!categories || categories.length === 0) {
+          categorySelect.disabled = true;
+          if (categoryEmptyHint) {
+            categoryEmptyHint.classList.remove("hidden");
+          }
+          return;
+        }
+
+        if (categoryEmptyHint) {
+          categoryEmptyHint.classList.add("hidden");
+        }
+
+        categorySelect.disabled = false;
+
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Select category";
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        categorySelect.appendChild(placeholder);
+
+        categories.forEach((category) => {
+          const option = document.createElement("option");
+          option.value = category.id;
+          option.textContent = `${category.name} (${category.budget_type})`;
+          categorySelect.appendChild(option);
+        });
+      }
+
       function renderTransactions(transactions) {
         const list = document.getElementById("transactions-list");
         const emptyState = document.getElementById("transactions-empty");
@@ -303,7 +344,19 @@
 
           const subtitle = document.createElement("span");
           subtitle.className = "text-xs uppercase tracking-wide text-slate-500";
-          subtitle.textContent = `${transaction.type} - ${new Date(transaction.date).toLocaleString()}`;
+          const details = [];
+
+          if (transaction.type === "Income") {
+            details.push("Income");
+          } else {
+            details.push(transaction.budgetType || "Expense");
+            if (transaction.detail) {
+              details.push(transaction.detail);
+            }
+          }
+
+          details.push(new Date(transaction.date).toLocaleString());
+          subtitle.textContent = details.filter(Boolean).join(" • ");
 
           infoWrapper.appendChild(title);
           infoWrapper.appendChild(subtitle);
@@ -318,6 +371,36 @@
 
           list.appendChild(item);
         });
+      }
+
+      async function fetchCategories() {
+        try {
+          const headers = requireAuthHeaders();
+          if (!headers) {
+            return [];
+          }
+
+          const response = await fetch("/api/categories", { headers });
+          if (response.status === 401) {
+            handleUnauthorized();
+            return [];
+          }
+
+          if (!response.ok) {
+            throw new Error("Unable to load categories.");
+          }
+
+          const data = await response.json();
+          categoriesCache = Array.isArray(data) ? data : [];
+          renderCategoryOptions(categoriesCache);
+          return categoriesCache;
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message, true);
+          categoriesCache = [];
+          renderCategoryOptions(categoriesCache);
+          return [];
+        }
       }
 
       async function fetchDashboard() {
@@ -347,7 +430,7 @@
         }
       }
 
-      document.addEventListener("DOMContentLoaded", () => {
+      document.addEventListener("DOMContentLoaded", async () => {
         const logoutButton = document.getElementById("logout-button");
         const incomeForm = document.getElementById("income-form");
         const expenseForm = document.getElementById("expense-form");
@@ -411,10 +494,15 @@
           const formData = new FormData(expenseForm);
           const amount = Number(formData.get("amount"));
           const description = (formData.get("description") || "").toString().trim();
-          const budgetType = formData.get("budget_type");
+          const categoryId = Number.parseInt(formData.get("user_category_id"), 10);
 
           if (!Number.isFinite(amount) || amount <= 0) {
             setStatus("Please enter a valid expense amount greater than zero.", true);
+            return;
+          }
+
+          if (!Number.isInteger(categoryId) || categoryId <= 0) {
+            setStatus("Please choose a category for this expense.", true);
             return;
           }
 
@@ -430,7 +518,7 @@
             const response = await fetch("/api/expense", {
               method: "POST",
               headers,
-              body: JSON.stringify({ amount, description, budget_type: budgetType }),
+              body: JSON.stringify({ amount, description, user_category_id: categoryId }),
             });
 
             if (response.status === 401) {
@@ -444,6 +532,7 @@
             }
 
             expenseForm.reset();
+            renderCategoryOptions(categoriesCache);
             setStatus("Expense recorded successfully.");
             await fetchDashboard();
           } catch (error) {
@@ -452,12 +541,8 @@
           }
         });
 
-        const initialHeaders = requireAuthHeaders();
-        if (!initialHeaders) {
-          return;
-        }
-
-        fetchDashboard();
+        await fetchCategories();
+        await fetchDashboard();
       });
     </script>
   </body>
