@@ -30,6 +30,18 @@ function hashPassword(password) {
   });
 }
 
+function comparePassword(password, hash) {
+  return new Promise((resolve, reject) => {
+    bcrypt.compare(password, hash, (err, matches) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(matches);
+    });
+  });
+}
+
 function authenticate(req, res, next) {
   const authHeader = req.headers.authorization || '';
   const tokenMatch = authHeader.match(/^Bearer\s+(.+)$/i);
@@ -96,6 +108,39 @@ app.post('/api/users/register', async (req, res) => {
   } catch (error) {
     console.error('Failed to register user:', error);
     res.status(500).json({ message: 'Failed to register user.' });
+  }
+});
+
+app.post('/api/users/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const trimmedUsername = typeof username === 'string' ? username.trim() : '';
+    const passwordValue = typeof password === 'string' ? password : '';
+
+    if (!trimmedUsername || !passwordValue) {
+      res.status(400).json({ message: 'Username and password are required.' });
+      return;
+    }
+
+    const user = await get('SELECT id, password_hash FROM User WHERE username = ?', [trimmedUsername]);
+
+    if (!user?.id) {
+      res.status(401).json({ message: 'Invalid username or password.' });
+      return;
+    }
+
+    const matches = await comparePassword(passwordValue, user.password_hash);
+
+    if (!matches) {
+      res.status(401).json({ message: 'Invalid username or password.' });
+      return;
+    }
+
+    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
+    res.json({ token });
+  } catch (error) {
+    console.error('Failed to log in user:', error);
+    res.status(500).json({ message: 'Failed to log in user.' });
   }
 });
 

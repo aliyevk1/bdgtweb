@@ -3,19 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Register | BudgetWise</title>
+    <title>Login | BudgetWise</title>
     <script src="https://cdn.tailwindcss.com"></script>
   </head>
   <body class="bg-slate-50 text-slate-900">
     <div class="mx-auto flex min-h-screen max-w-md flex-col justify-center px-4">
       <div class="mb-8 text-center">
-        <h1 class="text-3xl font-semibold">Create your account</h1>
-        <p class="mt-2 text-sm text-slate-600">
-          Register once to securely track your 50/30/20 budget.
-        </p>
+        <h1 class="text-3xl font-semibold">Welcome back</h1>
+        <p class="mt-2 text-sm text-slate-600">Log in to continue managing your 50/30/20 budget.</p>
       </div>
 
-      <form id="register-form" class="space-y-5 rounded-lg bg-white p-6 shadow">
+      <form id="login-form" class="space-y-5 rounded-lg bg-white p-6 shadow">
         <div>
           <label class="block text-sm font-medium text-slate-700" for="username">Username</label>
           <input
@@ -38,25 +36,24 @@
             name="password"
             required
             minlength="8"
-            autocomplete="new-password"
+            autocomplete="current-password"
             class="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
-          <p class="mt-1 text-xs text-slate-500">Must be at least 8 characters.</p>
         </div>
 
         <button
           type="submit"
           class="w-full rounded bg-blue-600 px-4 py-2 font-semibold text-white hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
         >
-          Register
+          Login
         </button>
       </form>
 
       <p id="status-message" class="mt-4 hidden rounded p-3 text-sm"></p>
 
       <p class="mt-6 text-center text-sm text-slate-600">
-        Already have an account?
-        <a href="/login.html" class="font-medium text-blue-600 hover:underline">Login</a>
+        Don't have an account?
+        <a href="/register.html" class="font-medium text-blue-600 hover:underline">Register</a>
       </p>
     </div>
 
@@ -66,7 +63,7 @@
         window.location.href = "/index.html";
       }
 
-      const form = document.getElementById("register-form");
+      const form = document.getElementById("login-form");
       const statusMessage = document.getElementById("status-message");
 
       function setStatus(message, isError = false) {
@@ -91,12 +88,12 @@
         const password = (formData.get("password") || "").toString();
 
         if (!username || password.length < 8) {
-          setStatus("Please enter a username and a password with at least 8 characters.", true);
+          setStatus("Please provide your username and password.", true);
           return;
         }
 
         try {
-          const response = await fetch("/api/users/register", {
+          const response = await fetch("/api/users/login", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -107,18 +104,18 @@
           const payload = await response.json().catch(() => ({}));
 
           if (!response.ok) {
-            const message = payload.message || "Registration failed. Please try a different username.";
+            const message = payload.message || "Invalid username or password.";
             throw new Error(message);
           }
 
           if (!payload.token) {
-            throw new Error("Registration succeeded but no token was returned.");
+            throw new Error("Login succeeded but no token was returned.");
           }
 
           localStorage.setItem("token", payload.token);
           window.location.href = "/index.html";
         } catch (error) {
-          console.error("Registration error:", error);
+          console.error("Login error:", error);
           setStatus(error.message, true);
         }
       });

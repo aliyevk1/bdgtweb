@@ -9,9 +9,16 @@
   </head>
   <body class="bg-slate-50 text-slate-900">
     <div class="mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-4 py-10">
-      <nav class="flex justify-end gap-4 text-sm font-medium">
+      <nav class="flex items-center justify-end gap-3 text-sm font-medium">
         <a class="text-blue-600 hover:underline" href="/register.html">Register</a>
         <a class="text-slate-600 hover:underline" href="/login.html">Login</a>
+        <button
+          id="logout-button"
+          type="button"
+          class="rounded border border-slate-300 px-3 py-1 text-slate-700 hover:bg-slate-100"
+        >
+          Logout
+        </button>
       </nav>
 
       <header class="space-y-2 text-center">
@@ -195,6 +202,11 @@
     </div>
 
     <script>
+      const existingToken = localStorage.getItem("token");
+      if (!existingToken) {
+        window.location.href = "/login.html";
+      }
+
       const currencyFormatter = new Intl.NumberFormat("en-US", {
         style: "currency",
         currency: "USD",
@@ -207,7 +219,7 @@
 
       function handleUnauthorized() {
         localStorage.removeItem("token");
-        window.location.href = "/register.html";
+        window.location.href = "/login.html";
       }
 
       function requireAuthHeaders(extraHeaders = {}) {
@@ -337,8 +349,16 @@
       }
 
       document.addEventListener("DOMContentLoaded", () => {
+        const logoutButton = document.getElementById("logout-button");
         const incomeForm = document.getElementById("income-form");
         const expenseForm = document.getElementById("expense-form");
+
+        if (logoutButton) {
+          logoutButton.addEventListener("click", () => {
+            localStorage.removeItem("token");
+            window.location.href = "/login.html";
+          });
+        }
 
         incomeForm.addEventListener("submit", async (event) => {
           event.preventDefault();
