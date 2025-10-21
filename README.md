@@ -2,13 +2,15 @@
 
 BudgetWise is a minimalist budgeting application that helps users balance their income using the 50/30/20 methodology. The app supports per-user categories, recurring templates, and template export/import so that configurations can be backed up or shared across environments.
 
-## Running a Local Copy
+---
+
+## Running with Docker
+
+This method runs both the backend (Node.js/Express) and frontend (static `/public` files) in a single container with SQLite built-in.
 
 ### Prerequisites
 
-* **Node.js ≥ 18**
-* **npm ≥ 9**
-* Any terminal (macOS/Linux shell or PowerShell on Windows)
+* **Docker ≥ 24**
 
 ### 1. Clone the repository
 
@@ -17,37 +19,87 @@ git clone https://github.com/aliyevk1/bdgtweb.git
 cd bdgtweb
 ```
 
-### 2. Install dependencies
+### 2. Build the Docker image
 
 ```bash
+docker build -t budgetwise:latest .
+```
+
+### 3. Run the container
+
+#### Option A — Ephemeral (database inside the container; data lost on removal)
+
+```bash
+docker run -d --name budgetwise -p 3000:3000 budgetwise:latest
+```
+
+* Runs the app on **[http://localhost:3000](http://localhost:3000)**
+* Database file `/data/budget.db` is stored inside the container layer (deleted when container is removed)
+
+#### Option B — Persistent (database stored outside the container)
+
+```bash
+docker volume create budgetwise_data
+
+docker run -d --name budgetwise -p 3000:3000 -e NODE_ENV=production -e PORT=3000 -e DATABASE_PATH=/data/budget.db -v budgetwise_data:/data budgetwise:latest
+```
+
+* Runs the app on **[http://localhost:3000](http://localhost:3000)**
+* SQLite database is stored in a persistent Docker volume `budgetwise_data`
+* Data survives container rebuilds and restarts
+
+#### Option C — Custom environment variables
+
+```bash
+docker run -d --name budgetwise -p 8080:3000 -e NODE_ENV=production -e PORT=3000 -e JWT_SECRET=mystrongsecret -e DATABASE_PATH=/data/budget.db -v budgetwise_data:/data budgetwise:latest
+```
+
+* Example with a custom port and JWT secret.
+
+### 4. Verify container status
+
+```bash
+docker ps
+```
+
+You should see `budgetwise` running. Access **[http://localhost:3000](http://localhost:3000)** to use the app.
+
+### 5. Stop and remove the container
+
+```bash
+docker stop budgetwise && docker rm budgetwise
+```
+
+---
+
+## Running a Local Copy (Without Docker)
+
+### Prerequisites
+
+* **Node.js ≥ 18**
+* **npm ≥ 9**
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/aliyevk1/bdgtweb.git
+cd bdgtweb
 npm install
 ```
 
-### 3. Start the development server
+### 2. Start the development server
 
 ```bash
 npm start
 ```
 
-* Launches the Express backend on **[http://localhost:3000](http://localhost:3000)**
-* Serves static frontend files from `/public`
-* Automatically creates a local **SQLite** database file `budget.db` in the project root
+* Backend: **[http://localhost:3000](http://localhost:3000)**
+* Frontend served from `/public`
+* SQLite database `budget.db` auto-created in project root
 
-Stop the server anytime with **Ctrl + C**.
+Stop anytime with **Ctrl + C**.
 
-### 4. Folder overview
-
-```
-/public        → Frontend (HTML, Tailwind, JS)
-/api           → Express route handlers
-/database.js   → SQLite initialization and migrations
-/index.js      → Server entry point
-/package.json  → Scripts and dependencies
-```
-
-### 5. Environment configuration (optional)
-
-You can add a `.env` file to override defaults:
+### 3. Optional environment variables
 
 ```bash
 PORT=4000
@@ -55,25 +107,13 @@ DATABASE_PATH=./budget.db
 JWT_SECRET=your_secret_here
 ```
 
-If `.env` is missing, the app uses:
+Defaults (if `.env` missing):
 
 * Port 3000
-* Database `budget.db` in the project root
-* Random fallback secret for JWT
+* Database in project root (`budget.db`)
+* Random JWT secret generated at runtime
 
-### 6. First-run behavior
-
-* The app creates all required tables automatically.
-* Open **[http://localhost:3000/register.html](http://localhost:3000/register.html)** to create your first user.
-* JWT sessions are stored in `localStorage`; log out clears them.
-
-### 7. Common issues
-
-| Symptom                            | Cause / Fix                                             |
-| ---------------------------------- | ------------------------------------------------------- |
-| **Port in use**                    | Change `PORT` in `.env` or stop another process on 3000 |
-| **Database locked**                | Restart Node; SQLite file was in use                    |
-| **Unauthorized** after code change | Clear browser `localStorage` and log in again           |
+---
 
 ## Template Export/Import Schema
 
@@ -94,16 +134,18 @@ The template system uses a versioned JSON schema. The current schema version is 
 }
 ```
 
-- `version`: Schema version. Must be `"1.0"`.
-- `generatedAt`: ISO-8601 timestamp (UTC) indicating when the file was produced.
-- `categories`: Array of category definitions. Each entry must contain a `name` (1-40 characters, case-insensitive unique per user) and a `budget_type` (`Necessities`, `Leisure`, or `Savings`).
-- `recurring`: Array of recurring payment templates. Each entry must include a `description` (1-255 characters), a positive `default_amount` with at most two decimal places, and a `category_name` that references one of the categories defined in the same file.
+### Field meanings
+
+* `version`: Schema version, must be `"1.0"`.
+* `generatedAt`: ISO-8601 timestamp when exported.
+* `categories`: Array of category definitions with `name` (1–40 chars, unique per user) and `budget_type` (`Necessities`, `Leisure`, `Savings`).
+* `recurring`: Array of recurring templates, each with a `description`, `default_amount`, and `category_name` referencing a defined category.
 
 ### Import Rules
 
-- Categories are upserted using a case-insensitive match on the trimmed name. New categories will only be added up to the per-user limit (50).
-- Recurring templates reference categories by name; duplicates (existing or repeated in the file) are skipped automatically. Users may store at most 50 recurring templates.
-- Payload limits: at most 100 categories, 200 recurring templates, and a maximum file size of 1 MB.
-- The import endpoint returns counts of inserted and skipped records for both categories and recurring templates.
+* Categories are upserted case-insensitively (max 50 per user).
+* Recurring templates reference categories by name; duplicates are skipped.
+* Limits: ≤100 categories, ≤200 recurring templates, ≤1 MB file size.
+* Import endpoint returns counts of inserted/skipped records.
 
-These rules ensure imports are idempotent: importing the same file multiple times will not create duplicate records.
+Repeated imports of the same file will not create duplicates (idempotent behavior).
