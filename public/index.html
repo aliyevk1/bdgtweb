@@ -9,6 +9,11 @@
   </head>
   <body class="bg-slate-50 text-slate-900">
     <div class="mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-4 py-10">
+      <nav class="flex justify-end gap-4 text-sm font-medium">
+        <a class="text-blue-600 hover:underline" href="/register.html">Register</a>
+        <a class="text-slate-600 hover:underline" href="/login.html">Login</a>
+      </nav>
+
       <header class="space-y-2 text-center">
         <h1 class="text-3xl font-semibold">BudgetWise MVP</h1>
         <p class="text-slate-600">
@@ -200,6 +205,25 @@
         return currencyFormatter.format(Number.isFinite(value) ? value : 0);
       }
 
+      function handleUnauthorized() {
+        localStorage.removeItem("token");
+        window.location.href = "/register.html";
+      }
+
+      function requireAuthHeaders(extraHeaders = {}) {
+        const token = localStorage.getItem("token");
+
+        if (!token) {
+          handleUnauthorized();
+          return null;
+        }
+
+        return {
+          ...extraHeaders,
+          Authorization: `Bearer ${token}`,
+        };
+      }
+
       function setStatus(message, isError = false) {
         const statusMessage = document.getElementById("status-message");
 
@@ -287,7 +311,17 @@
 
       async function fetchDashboard() {
         try {
-          const response = await fetch("/api/budget/dashboard");
+          const headers = requireAuthHeaders();
+          if (!headers) {
+            return;
+          }
+
+          const response = await fetch("/api/budget/dashboard", { headers });
+          if (response.status === 401) {
+            handleUnauthorized();
+            return;
+          }
+
           if (!response.ok) {
             throw new Error("Unable to load dashboard data.");
           }
@@ -319,13 +353,24 @@
           }
 
           try {
+            const headers = requireAuthHeaders({
+              "Content-Type": "application/json",
+            });
+
+            if (!headers) {
+              return;
+            }
+
             const response = await fetch("/api/income", {
               method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
+              headers,
               body: JSON.stringify({ amount, source }),
             });
+
+            if (response.status === 401) {
+              handleUnauthorized();
+              return;
+            }
 
             if (!response.ok) {
               const payload = await response.json().catch(() => ({}));
@@ -355,13 +400,24 @@
           }
 
           try {
+            const headers = requireAuthHeaders({
+              "Content-Type": "application/json",
+            });
+
+            if (!headers) {
+              return;
+            }
+
             const response = await fetch("/api/expense", {
               method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-              },
+              headers,
               body: JSON.stringify({ amount, description, budget_type: budgetType }),
             });
+
+            if (response.status === 401) {
+              handleUnauthorized();
+              return;
+            }
 
             if (!response.ok) {
               const payload = await response.json().catch(() => ({}));
@@ -376,6 +432,11 @@
             setStatus(error.message, true);
           }
         });
+
+        const initialHeaders = requireAuthHeaders();
+        if (!initialHeaders) {
+          return;
+        }
 
         fetchDashboard();
       });

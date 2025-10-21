@@ -2,17 +2,57 @@
 const path = require('path');
 const express = require('express');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const { initializeDatabase, run, get, all } = require('./database');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const JWT_SECRET = process.env.JWT_SECRET || 'my-super-secret-key';
+const TOKEN_EXPIRY = '7d';
 
 initializeDatabase();
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+function hashPassword(password) {
+  return new Promise((resolve, reject) => {
+    bcrypt.hash(password, 10, (err, hash) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      resolve(hash);
+    });
+  });
+}
+
+function authenticate(req, res, next) {
+  const authHeader = req.headers.authorization || '';
+  const tokenMatch = authHeader.match(/^Bearer\s+(.+)$/i);
+
+  if (!tokenMatch) {
+    res.status(401).json({ message: 'Authorization token required.' });
+    return;
+  }
+
+  try {
+    const decoded = jwt.verify(tokenMatch[1], JWT_SECRET);
+    if (!decoded?.id) {
+      res.status(401).json({ message: 'Invalid token payload.' });
+      return;
+    }
+
+    req.userId = decoded.id;
+    next();
+  } catch (error) {
+    console.error('Token verification failed:', error);
+    res.status(401).json({ message: 'Invalid or expired token.' });
+  }
+}
 
 function getCurrentMonthRange() {
   const now = new Date();
@@ -25,7 +65,41 @@ function getCurrentMonthRange() {
   };
 }
 
-app.post('/api/income', async (req, res) => {
+app.post('/api/users/register', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    const trimmedUsername = typeof username === 'string' ? username.trim() : '';
+    const passwordValue = typeof password === 'string' ? password : '';
+
+    if (!trimmedUsername || passwordValue.length < 8) {
+      res
+        .status(400)
+        .json({ message: 'Username is required and password must be at least 8 characters.' });
+      return;
+    }
+
+    const existingUser = await get('SELECT id FROM User WHERE username = ?', [trimmedUsername]);
+    if (existingUser?.id) {
+      res.status(409).json({ message: 'Username is already taken.' });
+      return;
+    }
+
+    const passwordHash = await hashPassword(passwordValue);
+    const result = await run(
+      'INSERT INTO User (username, password_hash) VALUES (?, ?)',
+      [trimmedUsername, passwordHash],
+    );
+
+    const token = jwt.sign({ id: result.lastID }, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
+
+    res.status(201).json({ token });
+  } catch (error) {
+    console.error('Failed to register user:', error);
+    res.status(500).json({ message: 'Failed to register user.' });
+  }
+});
+
+app.post('/api/income', authenticate, async (req, res) => {
   try {
     const { amount, source } = req.body;
     const numericAmount = Number(amount);
@@ -39,8 +113,8 @@ app.post('/api/income', async (req, res) => {
     const timestamp = new Date().toISOString();
 
     const result = await run(
-      'INSERT INTO Income (amount, source, date) VALUES (?, ?, ?)',
-      [numericAmount, trimmedSource, timestamp],
+      'INSERT INTO Income (user_id, amount, source, date) VALUES (?, ?, ?, ?)',
+      [req.userId, numericAmount, trimmedSource, timestamp],
     );
 
     res.status(201).json({
@@ -55,7 +129,7 @@ app.post('/api/income', async (req, res) => {
   }
 });
 
-app.post('/api/expense', async (req, res) => {
+app.post('/api/expense', authenticate, async (req, res) => {
   try {
     const { amount, description, budget_type: budgetType } = req.body;
     const numericAmount = Number(amount);
@@ -75,8 +149,8 @@ app.post('/api/expense', async (req, res) => {
     const timestamp = new Date().toISOString();
 
     const result = await run(
-      'INSERT INTO Expenditure (amount, description, budget_type, date) VALUES (?, ?, ?, ?)',
-      [numericAmount, trimmedDescription, budgetType, timestamp],
+      'INSERT INTO Expenditure (user_id, amount, description, budget_type, date) VALUES (?, ?, ?, ?, ?)',
+      [req.userId, numericAmount, trimmedDescription, budgetType, timestamp],
     );
 
     res.status(201).json({
@@ -92,13 +166,13 @@ app.post('/api/expense', async (req, res) => {
   }
 });
 
-app.get('/api/budget/dashboard', async (req, res) => {
+app.get('/api/budget/dashboard', authenticate, async (req, res) => {
   try {
     const { startIso, endIso } = getCurrentMonthRange();
 
     const totalIncomeRow = await get(
-      'SELECT COALESCE(SUM(amount), 0) AS total FROM Income WHERE date >= ? AND date < ?',
-      [startIso, endIso],
+      'SELECT COALESCE(SUM(amount), 0) AS total FROM Income WHERE user_id = ? AND date >= ? AND date < ?',
+      [req.userId, startIso, endIso],
     );
     const totalIncome = Number(totalIncomeRow?.total || 0);
 
@@ -108,20 +182,20 @@ app.get('/api/budget/dashboard', async (req, res) => {
     await Promise.all(
       categories.map(async (category) => {
         const row = await get(
-          'SELECT COALESCE(SUM(amount), 0) AS total FROM Expenditure WHERE budget_type = ? AND date >= ? AND date < ?',
-          [category, startIso, endIso],
+          'SELECT COALESCE(SUM(amount), 0) AS total FROM Expenditure WHERE user_id = ? AND budget_type = ? AND date >= ? AND date < ?',
+          [req.userId, category, startIso, endIso],
         );
         spentByCategory[category] = Number(row?.total || 0);
       }),
     );
 
     const incomes = await all(
-      'SELECT id, amount, source, date FROM Income WHERE date >= ? AND date < ?',
-      [startIso, endIso],
+      'SELECT id, amount, source, date FROM Income WHERE user_id = ? AND date >= ? AND date < ?',
+      [req.userId, startIso, endIso],
     );
     const expenses = await all(
-      'SELECT id, amount, description, budget_type, date FROM Expenditure WHERE date >= ? AND date < ?',
-      [startIso, endIso],
+      'SELECT id, amount, description, budget_type, date FROM Expenditure WHERE user_id = ? AND date >= ? AND date < ?',
+      [req.userId, startIso, endIso],
     );
 
     // Merge and sort transactions to highlight the most recent activity.
