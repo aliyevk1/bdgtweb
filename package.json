@@ -1,0 +1,22 @@
+{
+  "name": "budgetwise-mvp",
+  "version": "0.1.0",
+  "description": "BudgetWise MVP single-page budgeting app",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [
+    "budget",
+    "finance",
+    "mvp"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "sqlite3": "^5.1.7"
+  }
+}
+

@@ -1,0 +1,384 @@
+
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BudgetWise MVP</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-slate-50 text-slate-900">
+    <div class="mx-auto flex min-h-screen max-w-5xl flex-col gap-8 px-4 py-10">
+      <header class="space-y-2 text-center">
+        <h1 class="text-3xl font-semibold">BudgetWise MVP</h1>
+        <p class="text-slate-600">
+          Track income and spending using the 50/30/20 budgeting rule.
+        </p>
+      </header>
+
+      <div id="status-message" class="hidden"></div>
+
+      <section class="grid gap-6 md:grid-cols-2">
+        <form id="income-form" class="rounded-lg bg-white p-6 shadow">
+          <h2 class="text-xl font-semibold">Add Income</h2>
+          <div class="mt-4 space-y-4">
+            <label class="block text-sm font-medium text-slate-700" for="income-amount"
+              >Amount</label
+            >
+            <input
+              type="number"
+              id="income-amount"
+              name="amount"
+              min="0"
+              step="0.01"
+              required
+              class="w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+
+            <label class="block text-sm font-medium text-slate-700" for="income-source"
+              >Source</label
+            >
+            <input
+              type="text"
+              id="income-source"
+              name="source"
+              maxlength="255"
+              placeholder="Salary, Freelance..."
+              class="w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <button
+            type="submit"
+            class="mt-6 inline-flex w-full justify-center rounded bg-blue-600 px-4 py-2 font-medium text-white hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2"
+          >
+            Record Income
+          </button>
+        </form>
+
+        <form id="expense-form" class="rounded-lg bg-white p-6 shadow">
+          <h2 class="text-xl font-semibold">Add Expense</h2>
+          <div class="mt-4 space-y-4">
+            <label class="block text-sm font-medium text-slate-700" for="expense-amount"
+              >Amount</label
+            >
+            <input
+              type="number"
+              id="expense-amount"
+              name="amount"
+              min="0"
+              step="0.01"
+              required
+              class="w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+
+            <label
+              class="block text-sm font-medium text-slate-700"
+              for="expense-description"
+              >Description</label
+            >
+            <input
+              type="text"
+              id="expense-description"
+              name="description"
+              maxlength="255"
+              placeholder="Groceries, Gas, etc."
+              class="w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+
+            <label class="block text-sm font-medium text-slate-700" for="expense-type"
+              >Budget Type</label
+            >
+            <select
+              id="expense-type"
+              name="budget_type"
+              required
+              class="w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            >
+              <option value="Necessities">Necessities</option>
+              <option value="Leisure">Leisure</option>
+              <option value="Savings">Savings</option>
+            </select>
+          </div>
+
+          <button
+            type="submit"
+            class="mt-6 inline-flex w-full justify-center rounded bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2"
+          >
+            Record Expense
+          </button>
+        </form>
+      </section>
+
+      <section class="space-y-6">
+        <div class="rounded-lg bg-white p-6 shadow">
+          <h2 class="text-xl font-semibold">Dashboard</h2>
+          <p class="mt-2 text-sm text-slate-600">
+            Monthly totals refresh automatically after each entry.
+          </p>
+
+          <div class="mt-6 rounded border border-dashed border-slate-300 p-4">
+            <span class="text-sm uppercase text-slate-500">Total Income</span>
+            <p id="total-income" class="text-3xl font-semibold">$0.00</p>
+          </div>
+
+          <div class="mt-6 grid gap-4 md:grid-cols-3">
+            <article class="rounded-lg border border-slate-200 bg-slate-100 p-4">
+              <h3 class="text-lg font-semibold">Necessities</h3>
+              <dl class="mt-3 space-y-1 text-sm">
+                <div class="flex justify-between">
+                  <dt class="text-slate-600">Budget</dt>
+                  <dd id="necessities-budget">$0.00</dd>
+                </div>
+                <div class="flex justify-between">
+                  <dt class="text-slate-600">Spent</dt>
+                  <dd id="necessities-spent">$0.00</dd>
+                </div>
+                <div class="flex justify-between">
+                  <dt class="text-slate-600">Remaining</dt>
+                  <dd id="necessities-remaining">$0.00</dd>
+                </div>
+              </dl>
+            </article>
+
+            <article class="rounded-lg border border-slate-200 bg-slate-100 p-4">
+              <h3 class="text-lg font-semibold">Leisure</h3>
+              <dl class="mt-3 space-y-1 text-sm">
+                <div class="flex justify-between">
+                  <dt class="text-slate-600">Budget</dt>
+                  <dd id="leisure-budget">$0.00</dd>
+                </div>
+                <div class="flex justify-between">
+                  <dt class="text-slate-600">Spent</dt>
+                  <dd id="leisure-spent">$0.00</dd>
+                </div>
+                <div class="flex justify-between">
+                  <dt class="text-slate-600">Remaining</dt>
+                  <dd id="leisure-remaining">$0.00</dd>
+                </div>
+              </dl>
+            </article>
+
+            <article class="rounded-lg border border-slate-200 bg-slate-100 p-4">
+              <h3 class="text-lg font-semibold">Savings</h3>
+              <dl class="mt-3 space-y-1 text-sm">
+                <div class="flex justify-between">
+                  <dt class="text-slate-600">Budget</dt>
+                  <dd id="savings-budget">$0.00</dd>
+                </div>
+                <div class="flex justify-between">
+                  <dt class="text-slate-600">Spent</dt>
+                  <dd id="savings-spent">$0.00</dd>
+                </div>
+                <div class="flex justify-between">
+                  <dt class="text-slate-600">Remaining</dt>
+                  <dd id="savings-remaining">$0.00</dd>
+                </div>
+              </dl>
+            </article>
+          </div>
+        </div>
+
+        <div class="rounded-lg bg-white p-6 shadow">
+          <h2 class="text-xl font-semibold">Recent Activity</h2>
+          <ul id="transactions-list" class="mt-4 divide-y divide-slate-200"></ul>
+          <p id="transactions-empty" class="mt-4 text-sm text-slate-500">
+            No transactions yet. Add income or expenses to populate your dashboard.
+          </p>
+        </div>
+      </section>
+    </div>
+
+    <script>
+      const currencyFormatter = new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        minimumFractionDigits: 2,
+      });
+
+      function formatCurrency(value) {
+        return currencyFormatter.format(Number.isFinite(value) ? value : 0);
+      }
+
+      function setStatus(message, isError = false) {
+        const statusMessage = document.getElementById("status-message");
+
+        if (!message) {
+          statusMessage.textContent = "";
+          statusMessage.className = "hidden";
+          return;
+        }
+
+        statusMessage.textContent = message;
+        statusMessage.className = isError
+          ? "rounded bg-red-100 p-3 text-sm text-red-700"
+          : "rounded bg-emerald-100 p-3 text-sm text-emerald-700";
+      }
+
+      function renderBudgets(budgets) {
+        const mapping = {
+          Necessities: {
+            budget: document.getElementById("necessities-budget"),
+            spent: document.getElementById("necessities-spent"),
+            remaining: document.getElementById("necessities-remaining"),
+          },
+          Leisure: {
+            budget: document.getElementById("leisure-budget"),
+            spent: document.getElementById("leisure-spent"),
+            remaining: document.getElementById("leisure-remaining"),
+          },
+          Savings: {
+            budget: document.getElementById("savings-budget"),
+            spent: document.getElementById("savings-spent"),
+            remaining: document.getElementById("savings-remaining"),
+          },
+        };
+
+        Object.entries(mapping).forEach(([category, elements]) => {
+          const bucket = budgets[category] || { budget: 0, spent: 0, remaining: 0 };
+          elements.budget.textContent = formatCurrency(bucket.budget);
+          elements.spent.textContent = formatCurrency(bucket.spent);
+          elements.remaining.textContent = formatCurrency(bucket.remaining);
+        });
+      }
+
+      function renderTransactions(transactions) {
+        const list = document.getElementById("transactions-list");
+        const emptyState = document.getElementById("transactions-empty");
+
+        list.innerHTML = "";
+
+        if (!transactions || transactions.length === 0) {
+          emptyState.classList.remove("hidden");
+          return;
+        }
+
+        emptyState.classList.add("hidden");
+
+        transactions.forEach((transaction) => {
+          const item = document.createElement("li");
+          item.className = "flex items-start justify-between gap-2 py-3";
+
+          const infoWrapper = document.createElement("div");
+          infoWrapper.className = "flex flex-col";
+
+          const title = document.createElement("span");
+          title.className = "font-medium";
+          title.textContent = transaction.label || (transaction.type === "Income" ? "Income" : "Expense");
+
+          const subtitle = document.createElement("span");
+          subtitle.className = "text-xs uppercase tracking-wide text-slate-500";
+          subtitle.textContent = `${transaction.type} - ${new Date(transaction.date).toLocaleString()}`;
+
+          infoWrapper.appendChild(title);
+          infoWrapper.appendChild(subtitle);
+
+          const amount = document.createElement("span");
+          amount.className =
+            transaction.type === "Income" ? "font-semibold text-emerald-600" : "font-semibold text-slate-700";
+          amount.textContent = formatCurrency(transaction.amount);
+
+          item.appendChild(infoWrapper);
+          item.appendChild(amount);
+
+          list.appendChild(item);
+        });
+      }
+
+      async function fetchDashboard() {
+        try {
+          const response = await fetch("/api/budget/dashboard");
+          if (!response.ok) {
+            throw new Error("Unable to load dashboard data.");
+          }
+
+          const data = await response.json();
+          document.getElementById("total-income").textContent = formatCurrency(data.totalIncome);
+          renderBudgets(data.budgets);
+          renderTransactions(data.transactions);
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message, true);
+        }
+      }
+
+      document.addEventListener("DOMContentLoaded", () => {
+        const incomeForm = document.getElementById("income-form");
+        const expenseForm = document.getElementById("expense-form");
+
+        incomeForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+
+          const formData = new FormData(incomeForm);
+          const amount = Number(formData.get("amount"));
+          const source = (formData.get("source") || "").toString().trim();
+
+          if (!Number.isFinite(amount) || amount <= 0) {
+            setStatus("Please enter a valid income amount greater than zero.", true);
+            return;
+          }
+
+          try {
+            const response = await fetch("/api/income", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ amount, source }),
+            });
+
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({}));
+              throw new Error(payload.message || "Failed to record income.");
+            }
+
+            incomeForm.reset();
+            setStatus("Income recorded successfully.");
+            await fetchDashboard();
+          } catch (error) {
+            console.error(error);
+            setStatus(error.message, true);
+          }
+        });
+
+        expenseForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+
+          const formData = new FormData(expenseForm);
+          const amount = Number(formData.get("amount"));
+          const description = (formData.get("description") || "").toString().trim();
+          const budgetType = formData.get("budget_type");
+
+          if (!Number.isFinite(amount) || amount <= 0) {
+            setStatus("Please enter a valid expense amount greater than zero.", true);
+            return;
+          }
+
+          try {
+            const response = await fetch("/api/expense", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ amount, description, budget_type: budgetType }),
+            });
+
+            if (!response.ok) {
+              const payload = await response.json().catch(() => ({}));
+              throw new Error(payload.message || "Failed to record expense.");
+            }
+
+            expenseForm.reset();
+            setStatus("Expense recorded successfully.");
+            await fetchDashboard();
+          } catch (error) {
+            console.error(error);
+            setStatus(error.message, true);
+          }
+        });
+
+        fetchDashboard();
+      });
+    </script>
+  </body>
+</html>
