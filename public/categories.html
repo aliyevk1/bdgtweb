@@ -78,6 +78,69 @@
       </section>
 
       <p id="status-message" class="hidden rounded p-3 text-sm"></p>
+
+      <section class="grid gap-6 md:grid-cols-2">
+        <form id="recurring-form" class="space-y-4 rounded-lg bg-white p-6 shadow">
+          <h2 class="text-xl font-semibold">Add Recurring Payment</h2>
+
+          <div>
+            <label class="block text-sm font-medium text-slate-700" for="recurring-description">Description</label>
+            <input
+              id="recurring-description"
+              name="description"
+              type="text"
+              required
+              maxlength="255"
+              class="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-slate-700" for="recurring-amount">Default Amount</label>
+            <input
+              id="recurring-amount"
+              name="default_amount"
+              type="number"
+              step="0.01"
+              min="0"
+              required
+              class="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            />
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-slate-700" for="recurring-category">Category</label>
+            <select
+              id="recurring-category"
+              name="user_category_id"
+              required
+              class="mt-1 w-full rounded border border-slate-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            ></select>
+            <p id="recurring-category-empty" class="hidden text-xs text-slate-500">
+              Add a category first to create recurring payments.
+            </p>
+          </div>
+
+          <button
+            type="submit"
+            class="w-full rounded bg-emerald-600 px-4 py-2 font-semibold text-white hover:bg-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:ring-offset-2"
+          >
+            Create Template
+          </button>
+        </form>
+
+        <div class="rounded-lg bg-white p-6 shadow">
+          <h2 class="text-xl font-semibold">Recurring Payments</h2>
+          <p class="mt-2 text-sm text-slate-500">
+            Use these templates for quick logging from the dashboard.
+          </p>
+
+          <ul id="recurring-list" class="mt-4 divide-y divide-slate-200"></ul>
+          <p id="recurring-empty-state" class="mt-4 text-sm text-slate-500">
+            No recurring payments yet. Create your first template.
+          </p>
+        </div>
+      </section>
     </div>
 
     <script>
@@ -145,6 +208,8 @@
           return [];
         }
       }
+
+      let categoriesCache = [];
 
       function renderCategoryList(categories) {
         const list = document.getElementById("category-list");
@@ -230,9 +295,185 @@
         });
       }
 
+      function renderRecurringList(templates) {
+        const list = document.getElementById("recurring-list");
+        const emptyState = document.getElementById("recurring-empty-state");
+
+        list.innerHTML = "";
+
+        if (!templates || templates.length === 0) {
+          emptyState.classList.remove("hidden");
+          return;
+        }
+
+        emptyState.classList.add("hidden");
+
+        templates.forEach((template) => {
+          const item = document.createElement("li");
+          item.className = "flex items-center justify-between gap-4 py-3";
+
+          const meta = document.createElement("div");
+          meta.className = "flex flex-col";
+
+          const name = document.createElement("span");
+          name.className = "font-medium";
+          name.textContent = template.description;
+
+          const subtitle = document.createElement("span");
+          subtitle.className = "text-xs uppercase tracking-wide text-slate-500";
+          subtitle.textContent = `${formatCurrency(template.default_amount)} • ${template.category_name} (${template.category_budget_type})`;
+
+          meta.appendChild(name);
+          meta.appendChild(subtitle);
+
+          const deleteButton = document.createElement("button");
+          deleteButton.className =
+            "rounded border border-red-200 px-3 py-1 text-xs font-semibold text-red-600 hover:bg-red-50";
+          deleteButton.type = "button";
+          deleteButton.textContent = "Delete";
+          deleteButton.addEventListener("click", async () => {
+            const confirmed = window.confirm(`Delete recurring template "${template.description}"?`);
+            if (!confirmed) {
+              return;
+            }
+
+            try {
+              const headers = requireAuthHeaders();
+              if (!headers) {
+                return;
+              }
+
+              const response = await fetch(`/api/recurring/${template.id}`, {
+                method: "DELETE",
+                headers,
+              });
+
+              if (response.status === 401) {
+                handleUnauthorized();
+                return;
+              }
+
+              if (!response.ok && response.status !== 204) {
+                const payload = await response.json().catch(() => ({}));
+                throw new Error(payload.message || "Failed to delete template.");
+              }
+
+              setStatus("Recurring template deleted.");
+              await loadRecurring();
+            } catch (error) {
+              console.error("Delete recurring template error:", error);
+              setStatus(error.message, true);
+            }
+          });
+
+          item.appendChild(meta);
+          item.appendChild(deleteButton);
+          list.appendChild(item);
+        });
+      }
+
+      async function loadCategories() {
+        try {
+          const headers = requireAuthHeaders();
+          if (!headers) {
+            return [];
+          }
+
+          const response = await fetch("/api/categories", { headers });
+          if (response.status === 401) {
+            handleUnauthorized();
+            return [];
+          }
+
+          if (!response.ok) {
+            throw new Error("Unable to load categories.");
+          }
+
+          const categories = await response.json();
+          categoriesCache = Array.isArray(categories) ? categories : [];
+          renderCategoryList(categoriesCache);
+          renderRecurringCategoryOptions(categoriesCache);
+          return categoriesCache;
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message, true);
+          categoriesCache = [];
+          renderCategoryList(categoriesCache);
+          renderRecurringCategoryOptions(categoriesCache);
+          return [];
+        }
+      }
+
+      function renderRecurringCategoryOptions(categories) {
+        const select = document.getElementById("recurring-category");
+        const emptyHint = document.getElementById("recurring-category-empty");
+
+        if (!select) {
+          return;
+        }
+
+        select.innerHTML = "";
+
+        if (!categories || categories.length === 0) {
+          select.disabled = true;
+          if (emptyHint) {
+            emptyHint.classList.remove("hidden");
+          }
+          return;
+        }
+
+        select.disabled = false;
+        if (emptyHint) {
+          emptyHint.classList.add("hidden");
+        }
+
+        const placeholder = document.createElement("option");
+        placeholder.value = "";
+        placeholder.textContent = "Select category";
+        placeholder.disabled = true;
+        placeholder.selected = true;
+        select.appendChild(placeholder);
+
+        categories.forEach((category) => {
+          const option = document.createElement("option");
+          option.value = category.id;
+          option.textContent = `${category.name} (${category.budget_type})`;
+          select.appendChild(option);
+        });
+      }
+
+      async function loadRecurring() {
+        try {
+          const headers = requireAuthHeaders();
+          if (!headers) {
+            return [];
+          }
+
+          const response = await fetch("/api/recurring", { headers });
+          if (response.status === 401) {
+            handleUnauthorized();
+            return [];
+          }
+
+          if (!response.ok) {
+            throw new Error("Unable to load recurring templates.");
+          }
+
+          const templates = await response.json();
+          renderRecurringList(Array.isArray(templates) ? templates : []);
+          return templates;
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message, true);
+          renderRecurringList([]);
+          return [];
+        }
+      }
+
       document.addEventListener("DOMContentLoaded", async () => {
         const logoutButton = document.getElementById("logout-button");
         const form = document.getElementById("category-form");
+        const recurringForm = document.getElementById("recurring-form");
 
         if (logoutButton) {
           logoutButton.addEventListener("click", () => {
@@ -284,13 +525,74 @@
             form.reset();
             setStatus(`"${payload.name}" added to ${payload.budget_type}.`);
             await loadCategories();
+            await loadRecurring();
           } catch (error) {
             console.error("Create category error:", error);
             setStatus(error.message, true);
           }
         });
 
+        recurringForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          setStatus("");
+
+          const formData = new FormData(recurringForm);
+          const description = (formData.get("description") || "").toString().trim();
+          const defaultAmount = Number(formData.get("default_amount"));
+          const categoryId = Number.parseInt(formData.get("user_category_id"), 10);
+
+          if (!description) {
+            setStatus("Please provide a description for the template.", true);
+            return;
+          }
+
+          if (!Number.isFinite(defaultAmount) || defaultAmount <= 0) {
+            setStatus("Default amount must be greater than zero.", true);
+            return;
+          }
+
+          if (!Number.isInteger(categoryId) || categoryId <= 0) {
+            setStatus("Please select a category for the template.", true);
+            return;
+          }
+
+          try {
+            const headers = requireAuthHeaders({
+              "Content-Type": "application/json",
+            });
+
+            if (!headers) {
+              return;
+            }
+
+            const response = await fetch("/api/recurring", {
+              method: "POST",
+              headers,
+              body: JSON.stringify({
+                description,
+                default_amount: defaultAmount,
+                user_category_id: categoryId,
+              }),
+            });
+
+            const payload = await response.json().catch(() => ({}));
+
+            if (!response.ok) {
+              const message = payload.message || "Failed to create recurring template.";
+              throw new Error(message);
+            }
+
+            recurringForm.reset();
+            setStatus(`Recurring template "${payload.description}" created.`);
+            await loadRecurring();
+          } catch (error) {
+            console.error("Create recurring template error:", error);
+            setStatus(error.message, true);
+          }
+        });
+
         await loadCategories();
+        await loadRecurring();
       });
     </script>
   </body>

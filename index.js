@@ -316,6 +316,108 @@ app.post('/api/expense', authenticate, async (req, res) => {
   }
 });
 
+app.post('/api/recurring', authenticate, async (req, res) => {
+  try {
+    const { description, default_amount: defaultAmount, user_category_id: userCategoryId } = req.body;
+    const trimmedDescription = typeof description === 'string' ? description.trim().slice(0, 255) : '';
+    const numericAmount = Number(defaultAmount);
+    const categoryId = Number.parseInt(userCategoryId, 10);
+
+    if (!trimmedDescription) {
+      res.status(400).json({ message: 'Description is required.' });
+      return;
+    }
+
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      res.status(400).json({ message: 'Amount must be a positive number.' });
+      return;
+    }
+
+    if (!Number.isInteger(categoryId) || categoryId <= 0) {
+      res.status(400).json({ message: 'A valid category is required.' });
+      return;
+    }
+
+    const category = await get(
+      'SELECT id, name, budget_type FROM UserCategory WHERE id = ? AND user_id = ?',
+      [categoryId, req.userId],
+    );
+
+    if (!category?.id) {
+      res.status(400).json({ message: 'Invalid category selection.' });
+      return;
+    }
+
+    const result = await run(
+      'INSERT INTO RecurringExpenditure (user_id, user_category_id, description, default_amount) VALUES (?, ?, ?, ?)',
+      [req.userId, categoryId, trimmedDescription, numericAmount],
+    );
+
+    res.status(201).json({
+      id: result.lastID,
+      description: trimmedDescription,
+      default_amount: numericAmount,
+      user_category_id: categoryId,
+      category,
+    });
+  } catch (error) {
+    console.error('Failed to create recurring template:', error);
+    res.status(500).json({ message: 'Failed to create recurring template.' });
+  }
+});
+
+app.get('/api/recurring', authenticate, async (req, res) => {
+  try {
+    const templates = await all(
+      `
+        SELECT r.id,
+               r.description,
+               r.default_amount,
+               r.user_category_id,
+               uc.name AS category_name,
+               uc.budget_type AS category_budget_type
+        FROM RecurringExpenditure r
+        INNER JOIN UserCategory uc ON uc.id = r.user_category_id
+        WHERE r.user_id = ?
+        ORDER BY r.description COLLATE NOCASE
+      `,
+      [req.userId],
+    );
+
+    res.json(templates);
+  } catch (error) {
+    console.error('Failed to load recurring templates:', error);
+    res.status(500).json({ message: 'Failed to load recurring templates.' });
+  }
+});
+
+app.delete('/api/recurring/:id', authenticate, async (req, res) => {
+  try {
+    const templateId = Number.parseInt(req.params.id, 10);
+
+    if (!Number.isInteger(templateId) || templateId <= 0) {
+      res.status(400).json({ message: 'Invalid template id.' });
+      return;
+    }
+
+    const existing = await get(
+      'SELECT id FROM RecurringExpenditure WHERE id = ? AND user_id = ?',
+      [templateId, req.userId],
+    );
+
+    if (!existing?.id) {
+      res.status(404).json({ message: 'Template not found.' });
+      return;
+    }
+
+    await run('DELETE FROM RecurringExpenditure WHERE id = ? AND user_id = ?', [templateId, req.userId]);
+    res.status(204).send();
+  } catch (error) {
+    console.error('Failed to delete recurring template:', error);
+    res.status(500).json({ message: 'Failed to delete recurring template.' });
+  }
+});
+
 app.get('/api/budget/dashboard', authenticate, async (req, res) => {
   try {
     const { startIso, endIso } = getCurrentMonthRange();

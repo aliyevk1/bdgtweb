@@ -198,6 +198,17 @@
             No transactions yet. Add income or expenses to populate your dashboard.
           </p>
         </div>
+
+        <div class="rounded-lg bg-white p-6 shadow">
+          <h2 class="text-xl font-semibold">Quick Log</h2>
+          <p class="mt-2 text-sm text-slate-500">
+            Tap a template to record it instantly.
+          </p>
+          <div id="quick-log-container" class="mt-4 flex flex-wrap gap-3"></div>
+          <p id="quick-log-empty" class="mt-4 text-sm text-slate-500">
+            No recurring templates yet. Create one on the Categories page.
+          </p>
+        </div>
       </section>
     </div>
 
@@ -216,6 +227,7 @@
       const categorySelect = document.getElementById("category-select");
       const categoryEmptyHint = document.getElementById("category-empty");
       let categoriesCache = [];
+      let recurringCache = [];
 
       function formatCurrency(value) {
         return currencyFormatter.format(Number.isFinite(value) ? value : 0);
@@ -403,6 +415,34 @@
         }
       }
 
+      function renderQuickLog(templates) {
+        const container = document.getElementById("quick-log-container");
+        const emptyState = document.getElementById("quick-log-empty");
+
+        if (!container) {
+          return;
+        }
+
+        container.innerHTML = '';
+
+        if (!templates || templates.length === 0) {
+          emptyState.classList.remove("hidden");
+          return;
+        }
+
+        emptyState.classList.add("hidden");
+
+        templates.forEach((template) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className =
+            "rounded border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100";
+          button.textContent = `${template.description} (${formatCurrency(template.default_amount)})`;
+          button.addEventListener("click", () => logRecurringExpense(template));
+          container.appendChild(button);
+        });
+      }
+
       async function fetchDashboard() {
         try {
           const headers = requireAuthHeaders();
@@ -424,6 +464,72 @@
           document.getElementById("total-income").textContent = formatCurrency(data.totalIncome);
           renderBudgets(data.budgets);
           renderTransactions(data.transactions);
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message, true);
+        }
+      }
+
+      async function fetchRecurringTemplates() {
+        try {
+          const headers = requireAuthHeaders();
+          if (!headers) {
+            return;
+          }
+
+          const response = await fetch("/api/recurring", { headers });
+          if (response.status === 401) {
+            handleUnauthorized();
+            return;
+          }
+
+          if (!response.ok) {
+            throw new Error("Unable to load recurring templates.");
+          }
+
+          const data = await response.json();
+          recurringCache = Array.isArray(data) ? data : [];
+          renderQuickLog(recurringCache);
+        } catch (error) {
+          console.error(error);
+          setStatus(error.message, true);
+          recurringCache = [];
+          renderQuickLog(recurringCache);
+        }
+      }
+
+      async function logRecurringExpense(template) {
+        try {
+          const headers = requireAuthHeaders({
+            "Content-Type": "application/json",
+          });
+
+          if (!headers) {
+            return;
+          }
+
+          const response = await fetch("/api/expense", {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              amount: template.default_amount,
+              description: template.description,
+              user_category_id: template.user_category_id,
+            }),
+          });
+
+          if (response.status === 401) {
+            handleUnauthorized();
+            return;
+          }
+
+          if (!response.ok) {
+            const payload = await response.json().catch(() => ({}));
+            throw new Error(payload.message || `Failed to log ${template.description}.`);
+          }
+
+          setStatus(`Logged ${template.description}.`);
+          await fetchDashboard();
         } catch (error) {
           console.error(error);
           setStatus(error.message, true);
@@ -542,6 +648,7 @@
         });
 
         await fetchCategories();
+        await fetchRecurringTemplates();
         await fetchDashboard();
       });
     </script>

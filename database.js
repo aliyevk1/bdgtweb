@@ -61,6 +61,18 @@ function initializeDatabase() {
         FOREIGN KEY (user_category_id) REFERENCES UserCategory(id) ON DELETE RESTRICT
       )
     `);
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS RecurringExpenditure (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        user_category_id INTEGER NOT NULL,
+        description TEXT NOT NULL,
+        default_amount REAL NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES User(id) ON DELETE CASCADE,
+        FOREIGN KEY (user_category_id) REFERENCES UserCategory(id) ON DELETE RESTRICT
+      )
+    `);
   });
 }
 
